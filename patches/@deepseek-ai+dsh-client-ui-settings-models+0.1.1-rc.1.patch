@@ -539,12 +539,13 @@ index fff5f43..5e218fd 100644
  			"editor": "GL8Viq_editor"
  		};
  		//#endregion
-@@ -2196,35 +2412,50 @@ window.__ModuleLoader__.load({
+@@ -2196,35 +2412,51 @@ window.__ModuleLoader__.load({
  		function assertNever$1(_value) {
  			throw new Error("unexpected DeepSeek onboarding state");
  		}
 +		/** Mainstream catalog routes exposed during first-run setup. */
 +		const ONBOARDING_PROVIDERS = [
++			{ provider: "rendcore", displayName: "RendCore", kind: "onboardingGateway" },
 +			{ provider: "deepseek-official", displayName: "DeepSeek", kind: "onboardingManufacturer" },
 +			{ provider: "openai", displayName: "OpenAI", kind: "onboardingManufacturer" },
 +			{ provider: "anthropic", displayName: "Anthropic", kind: "onboardingManufacturer" },
@@ -570,7 +571,7 @@ index fff5f43..5e218fd 100644
  			const { complete, controller, useModels, api, schema, t } = props;
  			const state = useModels((snapshot) => snapshot);
 -			const readiness = onboardingReadiness(state);
-+			const [selectedProvider, setSelectedProvider] = (0, react.useState)("deepseek-official");
++			const [selectedProvider, setSelectedProvider] = (0, react.useState)("rendcore");
 +			const choices = ONBOARDING_PROVIDERS.flatMap((choice) => {
 +				const row = state.rows.find((candidate) => candidate.entry.provider === choice.provider && candidate.entry.settingsNs !== "");
 +				return row === void 0 || state.namespaces.get(row.entry.settingsNs) === void 0 ? [] : [{
@@ -648,7 +649,7 @@ index fff5f43..5e218fd 100644
  						readOnly: false,
  						hideTitle: true,
 -						credentialOnly: true,
-+						credentialOnly: row.entry.settingsNs === "llm-deepseek",
++						credentialOnly: row.entry.settingsNs === "llm-deepseek" || row.entry.provider === "rendcore",
  						credentialRequired: true,
  						autoFocusCredential: true,
  						cancelLabel: "onboardingLater",
@@ -683,7 +684,7 @@ index fff5f43..5e218fd 100644
  			addModel: "Add model",
  			removeModel: "Delete model",
  			modelsEmpty: "No models will be shown in the selector. Unlisted IDs can still be sent directly.",
-@@ -2595,10 +2855,14 @@ window.__ModuleLoader__.load({
+@@ -2595,10 +2855,15 @@ window.__ModuleLoader__.load({
  			welcomeBody: WELCOME_NOTICE_COPY.en.body,
  			welcomeContinue: WELCOME_NOTICE_COPY.en.continueLabel,
  			welcomeError: "The acknowledgement could not be saved. Please try again.",
@@ -695,6 +696,7 @@ index fff5f43..5e218fd 100644
 +			onboardingManufacturer: "Model developer",
 +			onboardingAggregator: "Model aggregation platform",
 +			onboardingInference: "Inference platform",
++			onboardingGateway: "RendCore online gateway",
  			onboardingLater: "Configure later",
 -			onboardingSave: "Save and continue",
 +			onboardingSave: "Connect and continue",
@@ -724,7 +726,7 @@ index fff5f43..5e218fd 100644
  			addModel: "添加模型",
  			removeModel: "删除模型",
  			modelsEmpty: "模型选择器中将不显示任何模型；目录外 ID 仍可直接发送。",
-@@ -2693,10 +2964,14 @@ window.__ModuleLoader__.load({
+@@ -2693,10 +2964,15 @@ window.__ModuleLoader__.load({
  			welcomeBody: WELCOME_NOTICE_COPY.zh.body,
  			welcomeContinue: WELCOME_NOTICE_COPY.zh.continueLabel,
  			welcomeError: "暂时无法保存确认状态，请重试。",
@@ -736,6 +738,7 @@ index fff5f43..5e218fd 100644
 +			onboardingManufacturer: "模型厂商",
 +			onboardingAggregator: "模型聚合平台",
 +			onboardingInference: "推理服务平台",
++			onboardingGateway: "RendCore 在线网关",
  			onboardingLater: "稍后配置",
 -			onboardingSave: "保存并继续",
 +			onboardingSave: "接入并继续",
