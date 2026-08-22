@@ -1,0 +1,50 @@
+name: Publish RendCore Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows x64 release
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Set app version from release tag
+        shell: pwsh
+        run: npm version --no-git-tag-version --allow-same-version "${{ github.ref_name }}"
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - name: Build Windows release package
+        run: npm run package:win
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $assets = @(
+            'dist/rendcore-harness-windows-x64-setup.exe',
+            'dist/rendcore-harness-windows-x64-setup.exe.blockmap',
+            'dist/latest.yml'
+          )
+          if (gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null) {
+            gh release upload $env:RELEASE_TAG $assets --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $env:RELEASE_TAG $assets `
+              --verify-tag `
+              --generate-notes `
+              --title "RendCore Harness $env:RELEASE_TAG" `
+              --repo $env:GITHUB_REPOSITORY
+          }
