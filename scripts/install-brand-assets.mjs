@@ -3,9 +3,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const source = path.join(projectRoot, 'build', 'icon.png')
-const lightSource = path.join(projectRoot, 'build', 'logo-light.png')
-const darkSource = path.join(projectRoot, 'build', 'logo-dark.png')
+const source = path.join(projectRoot, 'build', 'app-icon.png')
 const destinationDirectory = path.join(
   projectRoot,
   'node_modules',
@@ -63,8 +61,8 @@ function replaceRequired(contents, search, replacement, file) {
 
 await mkdir(destinationDirectory, { recursive: true })
 await copyFile(source, destination)
-await copyFile(lightSource, lightDestination)
-await copyFile(darkSource, darkDestination)
+await copyFile(source, lightDestination)
+await copyFile(source, darkDestination)
 
 const index = await readFile(indexPath, 'utf8')
 let brandedIndex = replaceRequired(

@@ -91,11 +91,9 @@ describe('DSH Desktop sidebar branding', () => {
     )
 
     expect(packageJson.scripts.postinstall).toContain('node scripts/install-brand-assets.mjs')
-    expect(installer).toContain("'build', 'icon.png'")
+    expect(installer).toContain("'build', 'app-icon.png'")
     expect(installer).toContain("'dsh-desktop-logo.png'")
-    expect(installer).toContain("'build', 'logo-light.png'")
     expect(installer).toContain("'dsh-desktop-logo-light.png'")
-    expect(installer).toContain("'build', 'logo-dark.png'")
     expect(installer).toContain("'dsh-desktop-logo-dark.png'")
     expect(installer).toContain('<link rel="icon" type="image/png" href="/dsh-desktop-logo.png" />')
     expect(installer).toContain('"src": "/dsh-desktop-logo.png"')
