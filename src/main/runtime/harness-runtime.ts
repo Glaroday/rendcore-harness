@@ -112,6 +112,23 @@ export function updateReadyStability(
   }
 }
 
+export function extractRendCoreModelBlock(source: string): string | undefined {
+  return source.match(
+    /\r?\n        models:\r?\n([\s\S]*?)\r?\n\r?\n- id: agent-default-model/
+  )?.[1]
+}
+
+export function replaceRendCoreModelBlock(source: string, modelBlock: string): string {
+  const marker = /\r?\n        models:\r?\n[\s\S]*?\r?\n\r?\n- id: agent-default-model/
+  if (!marker.test(source)) throw new Error('RendCore provider model block was not found')
+  const eol = source.includes('\r\n') ? '\r\n' : '\n'
+  const normalizedBlock = modelBlock.replace(/\r?\n/g, eol)
+  return source.replace(
+    marker,
+    `${eol}        models:${eol}${normalizedBlock}${eol}${eol}- id: agent-default-model`
+  )
+}
+
 export class HarnessRuntime {
   private child?: HarnessChildProcess
   private logStream?: WriteStream
@@ -444,12 +461,7 @@ async function createOnlineRendCorePatch(
             ])
       ].join('\n'))
       .join('\n')
-    const marker = /\n        models:\n[\s\S]*?\n\n- id: agent-default-model/
-    if (!marker.test(source)) throw new Error('RendCore provider model block was not found')
-    const dynamicPatch = source.replace(
-      marker,
-      `\n        models:\n${modelBlock}\n\n- id: agent-default-model`
-    )
+    const dynamicPatch = replaceRendCoreModelBlock(source, modelBlock)
     const dynamicPath = join(dshHome, 'rendcore-online.patch.yml')
     await writeFile(dynamicPath, dynamicPatch, 'utf8')
     return { path: dynamicPath, modelCount: models.length, models }
@@ -498,7 +510,7 @@ async function createCachedRendCorePatch(
     readFile(basePatchPath, 'utf8'),
     readFile(cachedPath, 'utf8')
   ])
-  const modelSection = cachedSource.match(/\n        models:\n([\s\S]*?)\n\n- id: agent-default-model/)?.[1]
+  const modelSection = extractRendCoreModelBlock(cachedSource)
   if (!modelSection) throw new Error('cached RendCore model block was not found')
   const ids = [...modelSection.matchAll(/^\s+- id: (.+?)\s*$/gm)]
     .map((match) => {
@@ -532,12 +544,7 @@ async function createCachedRendCorePatch(
       ...(model.input === undefined ? [] : ['            input: ' + JSON.stringify(model.input)])
     ].join('\n'))
     .join('\n')
-  const marker = /\n        models:\n[\s\S]*?\n\n- id: agent-default-model/
-  if (!marker.test(baseSource)) throw new Error('RendCore provider model block was not found')
-  const dynamicPatch = baseSource.replace(
-    marker,
-    '\n        models:\n' + modelBlock + '\n\n- id: agent-default-model'
-  )
+  const dynamicPatch = replaceRendCoreModelBlock(baseSource, modelBlock)
   await writeFile(cachedPath, dynamicPatch, 'utf8')
   return { path: cachedPath, modelCount: models.length, models }
 }

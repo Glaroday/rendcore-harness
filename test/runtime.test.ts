@@ -8,8 +8,10 @@ import {
   extractOffendingPlugin,
   extractOffendingPlugins,
   extractPluginFailureReferences,
+  extractRendCoreModelBlock,
   extractSlotConflictName,
   formatExitCode,
+  replaceRendCoreModelBlock,
   updateReadyStability
 } from '../src/main/runtime/harness-runtime'
 import { canGrantWindowPermission, isTrustedAppUrl } from '../src/main/security-policy'
@@ -21,6 +23,29 @@ import {
 } from '../src/main/window-navigation'
 
 describe('Harness launch contract', () => {
+  it('replaces the RendCore model catalog in Windows CRLF patches', () => {
+    const source = [
+      '- id: llm-pi-ai',
+      '  config:',
+      '    providers:',
+      '      rendcore:',
+      '        models:',
+      '          - id: old-model',
+      '',
+      '- id: agent-default-model',
+      '  config:',
+      '    provider: rendcore'
+    ].join('\r\n')
+    const updated = replaceRendCoreModelBlock(
+      source,
+      '          - id: new-model\n            name: new-model'
+    )
+
+    expect(updated).not.toContain('old-model')
+    expect(updated).toContain('          - id: new-model\r\n            name: new-model')
+    expect(extractRendCoreModelBlock(updated)).toContain('new-model')
+  })
+
   it('does not treat a briefly reachable port as a completed Harness startup', () => {
     const firstProbe = updateReadyStability(undefined, true, 1_000)
     expect(firstProbe).toEqual({ readySince: 1_000, ready: false })
