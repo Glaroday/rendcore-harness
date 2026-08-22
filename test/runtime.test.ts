@@ -32,6 +32,10 @@ describe('Harness launch contract', () => {
       '        models:',
       '          - id: old-model',
       '',
+      '# Keep this plugin section after the model catalog.',
+      '- insert:',
+      '    - id: model-fix',
+      '',
       '- id: agent-default-model',
       '  config:',
       '    provider: rendcore'
@@ -43,6 +47,8 @@ describe('Harness launch contract', () => {
 
     expect(updated).not.toContain('old-model')
     expect(updated).toContain('          - id: new-model\r\n            name: new-model')
+    expect(updated).toContain('# Keep this plugin section after the model catalog.\r\n- insert:')
+    expect(updated).toContain('    - id: model-fix')
     expect(extractRendCoreModelBlock(updated)).toContain('new-model')
   })
 

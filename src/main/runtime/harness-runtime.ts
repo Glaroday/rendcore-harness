@@ -114,18 +114,18 @@ export function updateReadyStability(
 
 export function extractRendCoreModelBlock(source: string): string | undefined {
   return source.match(
-    /\r?\n        models:\r?\n([\s\S]*?)\r?\n\r?\n- id: agent-default-model/
+    /\r?\n        models:\r?\n([\s\S]*?)(?=\r?\n\r?\n\S)/
   )?.[1]
 }
 
 export function replaceRendCoreModelBlock(source: string, modelBlock: string): string {
-  const marker = /\r?\n        models:\r?\n[\s\S]*?\r?\n\r?\n- id: agent-default-model/
+  const marker = /\r?\n        models:\r?\n[\s\S]*?(?=\r?\n\r?\n\S)/
   if (!marker.test(source)) throw new Error('RendCore provider model block was not found')
   const eol = source.includes('\r\n') ? '\r\n' : '\n'
   const normalizedBlock = modelBlock.replace(/\r?\n/g, eol)
   return source.replace(
     marker,
-    `${eol}        models:${eol}${normalizedBlock}${eol}${eol}- id: agent-default-model`
+    `${eol}        models:${eol}${normalizedBlock}`
   )
 }
 
