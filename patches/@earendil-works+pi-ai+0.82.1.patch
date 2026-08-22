@@ -1,0 +1,23 @@
+diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js
+index ed81baa..f26d762 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js
++++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js
+@@ -435,7 +435,17 @@ export const stream = (model, context, options) => {
+             if (output.stopReason === "error") {
+                 throw new Error(output.errorMessage || "Provider returned an error stop reason");
+             }
+             if (!hasFinishReason) {
+-                throw new Error("Stream ended without finish_reason");
++                // RendCore's upstream gateway may close a successful SSE stream with
++                // [DONE] but omit the final choice.finish_reason (notably muse-spark).
++                // Treat that clean EOF as a normal stop only for this provider; keep
++                // the strict validation for every other OpenAI-compatible provider.
++                if (model.provider === "rendcore" && output.content.length > 0) {
++                    output.stopReason = "stop";
++                    hasFinishReason = true;
++                }
++                else {
++                    throw new Error("Stream ended without finish_reason");
++                }
+             }
+             stream.push({ type: "done", reason: output.stopReason, message: output });

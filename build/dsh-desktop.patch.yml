@@ -1,0 +1,183 @@
+# Keep the stock directory-picker (auto) row active: the native backend
+# serves ctx.directoryPicker, so host-side consumers (host.pickDirectory,
+# plugins reading the seam) work unmodified. The client surface keeps its
+# Electron-dialog bridge via the client-ui patch in patches/.
+- insert:
+    # RendCore Harness owns the fixed-target dsh-market installer and its lightweight
+    # settings entry. After dshmarket is installed and Harness restarts, the
+    # community plugin replaces the placeholder with its complete market UI.
+    - id: dsh-desktop-market-installer
+      name: dsh-desktop-market-installer
+
+# dsh-market normally offers to restart its own Node process after mutations.
+# The desktop shell has the real lifecycle authority, so keep that behavior off
+# whenever the optional plugin is present in the composed profile.
+- id: dsh-market
+  config:
+    profile: web
+    allowRestart: false
+
+# RendCore ships one OpenAI-compatible gateway so the first session is ready
+# without a provider setup flow. User settings still override this composition
+# layer and can add or replace routes from the Models page.
+- id: llm-pi-ai
+  config:
+    providers:
+      rendcore:
+        displayName: RendCore
+        apiKeyEnv: RENDCORE_API_KEY
+        api: openai-completions
+        baseURL: http://47.103.24.134:18036/v1
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: true
+          supportsUsageInStreaming: true
+          maxTokensField: max_tokens
+        defaultContextWindow: 1050000
+        defaultMaxTokens: 128000
+        defaultInput:
+          - text
+        models:
+          - id: gpt-5.6-sol
+            name: GPT-5.6 Sol
+            contextWindow: 1050000
+            maxTokens: 128000
+            input: [text, image]
+          - id: gpt-5.6-luna
+            name: GPT-5.6 Luna
+            contextWindow: 1050000
+            maxTokens: 128000
+            input: [text, image]
+          - id: gpt-5.6-terra
+            name: GPT-5.6 Terra
+            contextWindow: 1050000
+            maxTokens: 128000
+            input: [text, image]
+          - id: gpt-5.5
+            name: GPT-5.5
+            contextWindow: 1050000
+            maxTokens: 128000
+            input: [text, image]
+          - id: gpt-5.4
+            name: GPT-5.4
+            contextWindow: 1050000
+            maxTokens: 128000
+            input: [text, image]
+          - id: gpt-5.4-mini
+            name: GPT-5.4 Mini
+            contextWindow: 400000
+            maxTokens: 128000
+            input: [text, image]
+          - id: gpt-5.3-codex-spark
+            name: GPT-5.3 Codex Spark
+            contextWindow: 400000
+            maxTokens: 128000
+            input: [text, image]
+          - id: codex-auto-review
+            name: Codex Auto Review
+            contextWindow: 262144
+            maxTokens: 32768
+            input: [text]
+          - id: gemini-3.7-flash-high
+            name: Gemini 3.7 Flash High
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: gemini-3-flash-agent
+            name: Gemini 3 Flash Agent
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: gemini-3-flash
+            name: Gemini 3 Flash
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: gemini-3.6-flash-high
+            name: Gemini 3.6 Flash High
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: gemini-3.5-flash-low
+            name: Gemini 3.5 Flash Low
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: gemini-3.5-flash-extra-low
+            name: Gemini 3.5 Flash Extra Low
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: gemini-3.1-flash-image
+            name: Gemini 3.1 Flash Image
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: gemini-3.1-flash-lite
+            name: Gemini 3.1 Flash Lite
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: gemini-3.1-pro-low
+            name: Gemini 3.1 Pro Low
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: gemini-pro-agent
+            name: Gemini Pro Agent
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: claude-opus-4-6-thinking
+            name: Claude Opus 4.6 Thinking
+            contextWindow: 1000000
+            maxTokens: 128000
+            input: [text, image]
+          - id: claude-sonnet-4-6
+            name: Claude Sonnet 4.6
+            contextWindow: 1000000
+            maxTokens: 128000
+            input: [text, image]
+          - id: gpt-oss-120b-medium
+            name: GPT-OSS 120B Medium
+            contextWindow: 131072
+            maxTokens: 131072
+            input: [text]
+          - id: muse-spark-1.2-contributor
+            name: Muse Spark 1.2 Contributor
+            contextWindow: 1000000
+            maxTokens: 131072
+            input: [text]
+          - id: Qwen3.8-35B-A3B
+            name: Qwen3.8-35B-A3B
+            contextWindow: 1000000
+            input: [text, image]
+          - id: ox-alpha-free
+            name: ox-alpha-free
+            contextWindow: 1000000
+            maxTokens: 128000
+            input: [text, image]
+
+# Built-in compatibility for muse-spark streams that close without a terminal
+# finish event after already delivering content.
+- insert:
+    - id: model-fix
+      name: dsh-model-fix
+      config:
+        modelPattern: '^muse-spark'
+        providers: []
+
+# Built-in ModSearch gives models without native browsing a web/search bridge.
+# Its web UI exposes engine settings; the desktop seeds only the replaceable
+# Grok CLI command and never stores an API key.
+- id: web
+  config:
+    searchProvider: modsearch
+- insert:
+    - id: modsearch
+      name: '@liustack/modsearch'
+
+- id: agent-default-model
+  config:
+    provider: rendcore
+    model: gpt-5.6-sol
