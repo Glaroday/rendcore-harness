@@ -141,7 +141,14 @@
         "to": "node-runtime/node.exe"
       }
     ],
-    "publish": null,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Glaroday",
+        "repo": "rendcore-harness",
+        "releaseType": "release"
+      }
+    ],
     "artifactName": "rendcore-harness-${os}-${arch}.${ext}",
     "mac": {
       "category": "public.app-category.developer-tools",

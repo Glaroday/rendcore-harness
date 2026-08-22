@@ -4,6 +4,7 @@ import type { UpdateStatus } from '../../shared/contracts'
 import {
   AUTO_INSTALL_ON_APP_QUIT,
   shouldCheckAfterResume,
+  supportsAutoUpdates,
   UPDATE_CHECK_INTERVAL_MS,
   UPDATE_STARTUP_DELAY_MS,
   UPDATE_STARTUP_JITTER_MS
@@ -177,9 +178,9 @@ function checkAfterResume(): void {
 }
 
 function supportsUpdates(): boolean {
-  // RendCore Harness is a separate distribution. Never query the upstream
-  // DSH Desktop feed or offer its installers to RendCore users.
-  return false
+  // electron-builder supplies the GitHub Releases feed for packaged builds.
+  // Development builds must never query or install production updates.
+  return supportsAutoUpdates(app.isPackaged, process.platform)
 }
 
 function errorMessage(error: unknown): string {

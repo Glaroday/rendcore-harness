@@ -151,7 +151,7 @@ build/                Application icon assets
 - macOS Intel: packaging configuration and platform checks provided; runtime verification still requires an Intel Mac or runner
 - Windows x64: NSIS/Portable configuration and platform checks provided; runtime verification still requires a Windows runner
 - Windows ARM64: not currently supported
-- Automatic updates: not yet integrated
+- Automatic updates: packaged macOS and Windows builds check the RendCore GitHub Releases feed
 
 ## Upstream version and patches
 
