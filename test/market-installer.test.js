@@ -153,7 +153,7 @@ describe('desktop plugin market installer', () => {
     expect(desktopPatch).toContain('name: dsh-desktop-market-installer')
     expect(desktopPatch).toContain('allowRestart: false')
     expect(desktopPatch).toContain('searchProvider: modsearch')
-    expect(desktopPatch).toContain("name: '@liustack/modsearch'")
+    expect(desktopPatch).not.toContain("name: '@liustack/modsearch'")
     expect(preload).toContain("restartHarness: (): Promise<{ ok: boolean }>")
   })
 })

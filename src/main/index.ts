@@ -428,28 +428,38 @@ async function syncBundledProfilePackages(dshHome: string): Promise<void> {
     }
   }
 
-  // ModSearch ships its own cordis.patch.yml, which registers the `modsearch`
-  // loader entry. The desktop patch owns the same single registration so an
-  // older profile bundle must be removed before Harness composes the tree.
-  await removeDuplicateModsearchBundle(dshHome)
-}
-
-async function removeDuplicateModsearchBundle(dshHome: string): Promise<void> {
+  // ModSearch owns its loader registration in cordis.patch.yml. Keep the
+  // package in the web profile so that patch is composed exactly once.
   const manifestPath = join(dshHome, 'profiles', 'web', 'package.json')
   if (!existsSync(manifestPath)) return
 
   try {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      dependencies?: Record<string, string>
       dsh?: { profile?: { bundles?: unknown } }
     }
-    const bundles = manifest.dsh?.profile?.bundles
-    if (!Array.isArray(bundles) || !bundles.includes('@liustack/modsearch')) return
+    const pluginName = '@liustack/modsearch'
+    const pluginPackagePath = join(app.getAppPath(), 'node_modules', '@liustack', 'modsearch', 'package.json')
+    const pluginVersion = existsSync(pluginPackagePath)
+      ? (JSON.parse(await readFile(pluginPackagePath, 'utf8')) as { version?: string }).version
+      : undefined
+    const bundles = Array.isArray(manifest.dsh?.profile?.bundles)
+      ? manifest.dsh.profile.bundles
+      : []
+    const nextBundles = bundles.includes(pluginName) ? bundles : [...bundles, pluginName]
+    const nextDependencies = manifest.dependencies ?? {}
+    if (!nextDependencies[pluginName] && pluginVersion) {
+      nextDependencies[pluginName] = `^${pluginVersion}`
+    }
+    const changed = nextBundles.length !== bundles.length || nextDependencies[pluginName] !== manifest.dependencies?.[pluginName]
+    if (!changed) return
 
+    manifest.dependencies = nextDependencies
     manifest.dsh ??= {}
     manifest.dsh.profile ??= {}
-    manifest.dsh.profile.bundles = bundles.filter((bundle) => bundle !== '@liustack/modsearch')
+    manifest.dsh.profile.bundles = nextBundles
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-    runtime?.note('[desktop] removed duplicate ModSearch profile bundle')
+    runtime?.note('[desktop] ensured the ModSearch profile bundle')
   } catch (error) {
     runtime?.note(
       `[desktop] could not normalize the ModSearch profile bundle: ${
@@ -758,9 +768,9 @@ function launchHarness(): Promise<void> {
     const pinned = await ensureStoreDirPinned(dshHome).catch(() => undefined)
     if (pinned) runtime.note(`[desktop] pinned the profile's pnpm store: ${pinned}`)
     await repairProfilePackages(dshHome)
+    await syncBundledProfilePackages(dshHome)
     await pruneMissingProfileBundles(dshHome).catch(() => false)
     await reportProfileStoreConsistency(dshHome)
-    await syncBundledProfilePackages(dshHome)
     await syncModsearchConfiguration()
     await syncProfileBranding(dshHome)
     await runtime.start(launchDirectory)
