@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
+import { readUpdateFeedConfig, type UpdateFeedConfig } from './update-feed'
 import electronUpdater from 'electron-updater'
 import type { UpdateStatus } from '../../shared/contracts'
 import {
@@ -28,6 +29,8 @@ let lastCheckedAt = 0
 let installing = false
 let started = false
 let handlersRegistered = false
+let updateFeedConfig: UpdateFeedConfig = { feedUrls: [], fallbackToGitHub: true }
+let activeMirrorIndex = -1
 
 export function getUpdateStatus(): UpdateStatus {
   return { ...status }
@@ -81,10 +84,9 @@ export async function checkForUpdates(manual = false): Promise<UpdateStatus> {
 
   transition({ type: 'check', manual })
   lastCheckedAt = Date.now()
-  checkPromise = autoUpdater.checkForUpdates()
 
   try {
-    await checkPromise
+    await checkUsingConfiguredFeeds()
   } catch (error) {
     transition({ type: 'error', message: errorMessage(error) })
     if (manual) scheduleReset()
@@ -120,6 +122,15 @@ export function stopUpdateManager(): void {
 }
 
 function configureUpdater(): void {
+  updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
+  activeMirrorIndex = -1
+  const firstFeed = updateFeedConfig.feedUrls[0]
+  if (firstFeed) {
+    configureMirrorFeed(firstFeed)
+    activeMirrorIndex = 0
+    console.info('[updater] using configured update mirror', updateFeedConfig.feedUrls[0])
+  }
+
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = AUTO_INSTALL_ON_APP_QUIT
   autoUpdater.allowPrerelease = false
@@ -149,6 +160,54 @@ function configureUpdater(): void {
   autoUpdater.on('error', (error) => {
     transition({ type: 'error', message: errorMessage(error) })
     if (status.manual) scheduleReset()
+  })
+}
+
+async function checkUsingConfiguredFeeds(): Promise<void> {
+  checkPromise = autoUpdater.checkForUpdates()
+  try {
+    await checkPromise
+    return
+  } catch (firstError) {
+    let lastError: unknown = firstError
+    for (let nextMirrorIndex = activeMirrorIndex + 1; nextMirrorIndex < updateFeedConfig.feedUrls.length; nextMirrorIndex += 1) {
+      const nextFeed = updateFeedConfig.feedUrls[nextMirrorIndex]
+      if (!nextFeed) continue
+      configureMirrorFeed(nextFeed)
+      activeMirrorIndex = nextMirrorIndex
+      console.warn('[updater] update mirror failed; trying next mirror', nextFeed)
+      checkPromise = autoUpdater.checkForUpdates()
+      try {
+        await checkPromise
+        return
+      } catch (nextError) {
+        lastError = nextError
+      }
+    }
+
+    if (activeMirrorIndex >= 0 && updateFeedConfig.fallbackToGitHub) {
+      configureGitHubFeed()
+      activeMirrorIndex = -1
+      console.warn('[updater] update mirrors failed; falling back to GitHub Releases')
+      checkPromise = autoUpdater.checkForUpdates()
+      await checkPromise
+      return
+    }
+
+    throw lastError
+  }
+}
+
+function configureMirrorFeed(feedUrl: string): void {
+  autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl })
+}
+
+function configureGitHubFeed(): void {
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'Glaroday',
+    repo: 'rendcore-harness',
+    releaseType: 'release'
   })
 }
 
