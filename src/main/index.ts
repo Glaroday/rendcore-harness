@@ -426,6 +426,36 @@ async function syncBundledProfilePackages(dshHome: string): Promise<void> {
       }
     }
   }
+
+  // ModSearch ships its own cordis.patch.yml, which registers the `modsearch`
+  // loader entry. The desktop patch owns the same single registration so an
+  // older profile bundle must be removed before Harness composes the tree.
+  await removeDuplicateModsearchBundle(dshHome)
+}
+
+async function removeDuplicateModsearchBundle(dshHome: string): Promise<void> {
+  const manifestPath = join(dshHome, 'profiles', 'web', 'package.json')
+  if (!existsSync(manifestPath)) return
+
+  try {
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      dsh?: { profile?: { bundles?: unknown } }
+    }
+    const bundles = manifest.dsh?.profile?.bundles
+    if (!Array.isArray(bundles) || !bundles.includes('@liustack/modsearch')) return
+
+    manifest.dsh ??= {}
+    manifest.dsh.profile ??= {}
+    manifest.dsh.profile.bundles = bundles.filter((bundle) => bundle !== '@liustack/modsearch')
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+    runtime?.note('[desktop] removed duplicate ModSearch profile bundle')
+  } catch (error) {
+    runtime?.note(
+      `[desktop] could not normalize the ModSearch profile bundle: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
+  }
 }
 
 /** Keep ModSearch's optional X engine configurable without embedding secrets. */
