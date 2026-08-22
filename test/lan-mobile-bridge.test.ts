@@ -73,7 +73,7 @@ describe('LAN mobile bridge pairing surface', () => {
     expect(snapshot.desktopUrl).toBeTruthy()
     const response = await fetch(snapshot.desktopUrl!)
     expect(response.status).toBe(200)
-    expect(await response.text()).toContain('Connect your phone')
+    expect(await response.text()).toContain('Connect Mobile Device')
   })
 
   it('offers a reconnect page without exposing mobile APIs before approval', async () => {
@@ -147,7 +147,7 @@ describe('LAN mobile bridge pairing surface', () => {
       headers: { cookie }
     })
     expect(mobile.status).toBe(200)
-    expect(await mobile.text()).toContain('DSH Mobile')
+    expect(await mobile.text()).toContain('RendCore Harness Mobile')
   })
 
   it('requires approval, then forwards only allowlisted RPC methods', async () => {

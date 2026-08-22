@@ -32,7 +32,7 @@ describe('DSH Desktop sidebar branding', () => {
 
     expect(patch).toContain('DshDesktopLogo')
     expect(patch).toContain('DshDesktopBrand')
-    expect(patch).toContain('BrandWordmark')
+    expect(patch).toContain('brandWordmark')
     expect(patch).toContain('/dsh-desktop-logo-light.png')
     expect(patch).toContain('/dsh-desktop-logo-dark.png')
     expect(patch).toContain('brandWordmark')
