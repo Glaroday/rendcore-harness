@@ -4,7 +4,7 @@ import { createWriteStream, existsSync, mkdirSync, type WriteStream } from 'node
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { dirname, join } from 'node:path'
-import { parse } from 'yaml'
+import { parse, stringify } from 'yaml'
 import type { RuntimePhase, RuntimeSnapshot } from '../../shared/contracts'
 
 export const RENDCORE_MODELS_ENDPOINT = 'http://47.103.24.134:18036/v1/models'
@@ -163,27 +163,43 @@ export class HarnessRuntime {
     const cachedPath = join(this.options.dshHome, 'rendcore-online.patch.yml')
     let patchPath = this.options.dshPatchPath
 
-    // Do not hold the first window on a network request. A cached catalog (or
-    // the bundled baseline on a brand-new install) is enough to boot; the
-    // complete online catalog is refreshed in the background for the next
-    // launch. This matters on slower machines and unreliable connections.
-    if (existsSync(cachedPath)) {
+    // Refresh before composing the profile so additions and removals from the
+    // gateway take effect on this restart. A cached catalog remains the fast
+    // fallback when the endpoint is temporarily unavailable.
+    let onlineCatalog: OnlinePatchResult | undefined
+    if (apiKey) {
       try {
-        patchPath = (await createCachedRendCorePatch(
-          this.options.dshPatchPath,
-          this.options.dshHome,
-          cachedPath
-        )).path
-        this.writeLog('[desktop] using cached RendCore model catalog')
+        onlineCatalog = await createOnlineRendCorePatch(this.options.dshPatchPath, this.options.dshHome, apiKey)
+        patchPath = onlineCatalog.path
+        await syncStoredRendCoreModels(this.options.dshHome, onlineCatalog.models)
+        this.writeLog(`[desktop] refreshed ${onlineCatalog.modelCount} models from RendCore /v1/models`)
       } catch (error) {
         this.writeLog(
-          `[desktop] cached model catalog is invalid; using bundled catalog: ${
+          `[desktop] online model discovery failed; using cached catalog when available: ${
             error instanceof Error ? error.message : String(error)
           }`
         )
       }
-    } else {
-      this.writeLog('[desktop] using bundled RendCore model catalog')
+    }
+    if (!onlineCatalog) {
+      if (existsSync(cachedPath)) {
+        try {
+          patchPath = (await createCachedRendCorePatch(
+            this.options.dshPatchPath,
+            this.options.dshHome,
+            cachedPath
+          )).path
+          this.writeLog('[desktop] using cached RendCore model catalog')
+        } catch (error) {
+          this.writeLog(
+            `[desktop] cached model catalog is invalid; using bundled catalog: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+        }
+      } else {
+        this.writeLog('[desktop] using bundled RendCore model catalog')
+      }
     }
 
     await repairInvalidRendCoreDefaultModel(this.options.dshHome)
@@ -218,7 +234,6 @@ export class HarnessRuntime {
       return
     }
     this.child = child
-    this.refreshOnlineCatalog(apiKey)
 
     child.stdout.on('data', (chunk: Buffer) => this.writeChunk('stdout', chunk))
     child.stderr.on('data', (chunk: Buffer) => this.writeChunk('stderr', chunk))
@@ -267,25 +282,6 @@ ${cause}`
 
     this.url = url
     this.setState('ready', 'Harness is ready.')
-  }
-
-  private refreshOnlineCatalog(apiKey?: string): void {
-    if (!apiKey?.trim()) {
-      this.writeLog('[desktop] online model discovery skipped; API key is not configured')
-      return
-    }
-
-    void createOnlineRendCorePatch(this.options.dshPatchPath, this.options.dshHome, apiKey)
-      .then((result) => {
-        this.writeLog(
-          `[desktop] refreshed ${result.modelCount} models from RendCore /v1/models (applies on next launch)`
-        )
-      })
-      .catch((error) => {
-        this.writeLog(
-          `[desktop] background model discovery failed: ${error instanceof Error ? error.message : String(error)}`
-        )
-      })
   }
 
   async stop(): Promise<void> {
@@ -369,6 +365,7 @@ interface OnlineModelEntry {
 interface OnlinePatchResult {
   path: string
   modelCount: number
+  models: OnlineModelEntry[]
 }
 
 async function createOnlineRendCorePatch(
@@ -455,10 +452,41 @@ async function createOnlineRendCorePatch(
     )
     const dynamicPath = join(dshHome, 'rendcore-online.patch.yml')
     await writeFile(dynamicPath, dynamicPatch, 'utf8')
-    return { path: dynamicPath, modelCount: models.length }
+    return { path: dynamicPath, modelCount: models.length, models }
   } finally {
     clearTimeout(timeout)
   }
+}
+
+/** Replace a user-layer RendCore catalog after a successful online refresh. */
+async function syncStoredRendCoreModels(dshHome: string, models: OnlineModelEntry[]): Promise<void> {
+  const settingsPath = join(dshHome, 'settings.yaml')
+  if (!existsSync(settingsPath)) return
+
+  const source = await readFile(settingsPath, 'utf8')
+  const settings = parse(source) as Record<string, unknown> | null
+  if (!settings || typeof settings !== 'object') return
+  const llm = settings['llm-pi-ai']
+  if (!llm || typeof llm !== 'object' || Array.isArray(llm)) return
+  const providers = (llm as Record<string, unknown>).providers
+  if (!providers || typeof providers !== 'object' || Array.isArray(providers)) return
+  const rendcore = (providers as Record<string, unknown>).rendcore
+  if (!rendcore || typeof rendcore !== 'object' || Array.isArray(rendcore)) return
+  const currentModels = (rendcore as Record<string, unknown>).models
+  if (!Array.isArray(currentModels)) return
+
+  const nextModels = models.map((model) => ({
+    id: model.id,
+    name: model.id,
+    ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+    ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
+    ...(model.input === undefined ? {} : { input: model.input }),
+    ...(model.reasoningEfforts === undefined ? {} : { reasoningEfforts: model.reasoningEfforts })
+  }))
+  const rendcoreRecord = rendcore as Record<string, unknown>
+  rendcoreRecord.models = nextModels
+  const updated = stringify(settings)
+  if (updated !== source) await writeFile(settingsPath, updated, 'utf8')
 }
 
 async function createCachedRendCorePatch(
@@ -511,7 +539,7 @@ async function createCachedRendCorePatch(
     '\n        models:\n' + modelBlock + '\n\n- id: agent-default-model'
   )
   await writeFile(cachedPath, dynamicPatch, 'utf8')
-  return { path: cachedPath, modelCount: models.length }
+  return { path: cachedPath, modelCount: models.length, models }
 }
 
 function positiveInteger(value: unknown): number | undefined {
