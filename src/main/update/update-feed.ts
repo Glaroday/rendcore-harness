@@ -11,7 +11,12 @@ export interface UpdateFeedConfig {
 export const UPDATE_CONFIG_FILENAME = 'update-config.json'
 
 export const DEFAULT_UPDATE_FEED_CONFIG: UpdateFeedConfig = {
-  feedUrls: [],
+  // Verified on 2026-08-22: both feeds served latest.yml and the referenced
+  // Windows installer for RendCore Harness. Keep GitHub as the final fallback.
+  feedUrls: [
+    'https://gh-proxy.com/https://github.com/Glaroday/rendcore-harness/releases/latest/download/',
+    'https://ghfast.top/https://github.com/Glaroday/rendcore-harness/releases/latest/download/'
+  ],
   fallbackToGitHub: true
 }
 

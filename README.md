@@ -33,7 +33,7 @@ Download RendCore Harness for macOS and Windows from the [GitHub Releases page](
 
 Update behavior depends on the release feed configured for the installed build. This repository is the source of truth for published releases.
 
-Users who need a faster route can configure one or more update mirrors. See [update mirror configuration](docs/update-mirrors.md); the default remains the official GitHub Releases feed and automatically falls back to it when a mirror is unavailable.
+Users can choose from the built-in update mirrors or configure their own. See [update mirror configuration](docs/update-mirrors.md); RendCore Harness automatically falls back to the official GitHub Releases feed when mirrors are unavailable.
 
 ## Community
 

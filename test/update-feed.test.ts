@@ -47,7 +47,10 @@ describe('configurable desktop update feeds', () => {
       fallbackToGitHub: true
     })
     expect(readUpdateFeedConfig(join(root, 'missing'), undefined)).toEqual({
-      feedUrls: [],
+      feedUrls: [
+        'https://gh-proxy.com/https://github.com/Glaroday/rendcore-harness/releases/latest/download/',
+        'https://ghfast.top/https://github.com/Glaroday/rendcore-harness/releases/latest/download/'
+      ],
       fallbackToGitHub: true
     })
   })
