@@ -11,6 +11,8 @@ import { mountWindowsTitlebar } from './windows-titlebar'
 
 const ROOT_ID = 'dsh-desktop-update-root'
 const MOBILE_BUTTON_ID = 'dsh-desktop-mobile-button'
+const UPDATE_SETTINGS_BUTTON_ID = 'dsh-desktop-update-settings-button'
+const UPDATE_SETTINGS_ROOT_ID = 'dsh-desktop-update-settings-root'
 const locale: UpdateLocale = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
 
 let host: HTMLDivElement | undefined
@@ -24,6 +26,8 @@ let phoneConnected = false
 let mobileStatusTimer: number | undefined
 let bootFailureTriggered = false
 let bootFailureTimer: number | undefined
+let updateSettingsHost: HTMLDivElement | undefined
+let updateSettingsContent: HTMLDivElement | undefined
 const pendingBootFailureMessages: string[] = []
 
 const BOOT_FAILURE_SETTLE_MS = 400
@@ -83,6 +87,7 @@ function checkBootFailureInDom(): void {
 
 const domObserver = new MutationObserver(() => {
   mountMobileButton()
+  mountUpdateSettingsButton()
   checkBootFailureInDom()
 })
 
@@ -116,6 +121,136 @@ function mountMobileButton(): void {
   renderMobileButton()
 }
 
+function mountUpdateSettingsButton(): void {
+  let style = document.getElementById(`${UPDATE_SETTINGS_BUTTON_ID}-style`)
+  if (!style) {
+    style = document.createElement('style')
+    style.id = `${UPDATE_SETTINGS_BUTTON_ID}-style`
+    style.textContent = updateSettingsButtonStyles
+    document.head.appendChild(style)
+  }
+  const settingsArea = document.querySelector<HTMLElement>('[data-dsh-sidebar-settings]')
+  if (!settingsArea) return
+  let button = document.getElementById(UPDATE_SETTINGS_BUTTON_ID) as HTMLButtonElement | null
+  if (!button) {
+    button = document.createElement('button')
+    button.id = UPDATE_SETTINGS_BUTTON_ID
+    button.type = 'button'
+    button.innerHTML = updateSettingsIcon
+    button.addEventListener('click', () => void openUpdateSettings())
+  }
+  if (button.parentElement !== settingsArea) settingsArea.appendChild(button)
+  const root = document.querySelector<HTMLElement>('[data-dsh-sidebar-root]')
+  const wide = root?.dataset.dshSidebarWide === 'true'
+  button.hidden = root !== null && !wide
+  button.setAttribute('aria-label', locale === 'zh' ? '更新镜像设置' : 'Update mirror settings')
+  button.title = locale === 'zh' ? '更新镜像设置' : 'Update mirror settings'
+}
+
+async function openUpdateSettings(): Promise<void> {
+  ensureUpdateSettingsHost()
+  if (!updateSettingsHost || !updateSettingsContent) return
+  updateSettingsHost.style.display = 'flex'
+  updateSettingsContent.textContent = locale === 'zh' ? '正在读取更新配置…' : 'Loading update settings…'
+  try {
+    const value = (await ipcRenderer.invoke('updates:config:get')) as {
+      mirrors?: unknown
+      fallbackToGitHub?: unknown
+      defaults?: unknown
+    }
+    renderUpdateSettings(value)
+  } catch (error) {
+    updateSettingsContent.textContent = error instanceof Error ? error.message : String(error)
+  }
+}
+
+function ensureUpdateSettingsHost(): void {
+  if (updateSettingsHost && updateSettingsContent) return
+  updateSettingsHost = document.createElement('div')
+  updateSettingsHost.id = UPDATE_SETTINGS_ROOT_ID
+  updateSettingsHost.style.display = 'none'
+  const shadow = updateSettingsHost.attachShadow({ mode: 'closed' })
+  const style = document.createElement('style')
+  style.textContent = updateSettingsStyles
+  updateSettingsContent = document.createElement('div')
+  updateSettingsContent.className = 'panel-wrap'
+  shadow.append(style, updateSettingsContent)
+  document.documentElement.appendChild(updateSettingsHost)
+}
+
+function renderUpdateSettings(value: {
+  mirrors?: unknown
+  fallbackToGitHub?: unknown
+  defaults?: unknown
+}): void {
+  if (!updateSettingsContent) return
+  const mirrors = Array.isArray(value.mirrors)
+    ? value.mirrors.filter((item): item is string => typeof item === 'string')
+    : []
+  const defaults = Array.isArray(value.defaults)
+    ? value.defaults.filter((item): item is string => typeof item === 'string')
+    : []
+  const zh = locale === 'zh'
+  updateSettingsContent.innerHTML = `
+    <section class="panel" role="dialog" aria-modal="true" aria-labelledby="update-settings-title">
+      <header><strong id="update-settings-title">${zh ? '更新镜像代理' : 'Update mirrors'}</strong><button class="close" type="button" aria-label="${zh ? '关闭' : 'Close'}">×</button></header>
+      <p class="hint">${zh ? '每行填写一个更新 feed 地址，按顺序尝试。地址必须指向包含 latest.yml 的镜像目录。' : 'Enter one update feed per line. They are tried in order and must expose latest.yml.'}</p>
+      <textarea class="mirrors" rows="5" spellcheck="false"></textarea>
+      <label class="fallback"><input type="checkbox" /> <span>${zh ? '镜像失败后回退到 GitHub 官方地址' : 'Fall back to official GitHub when mirrors fail'}</span></label>
+      <p class="hint small">${zh ? '留空并保存将直接使用 GitHub。' : 'Leave empty to use GitHub directly.'}</p>
+      <div class="error" role="alert" hidden></div>
+      <footer><button class="reset" type="button">${zh ? '恢复内置默认' : 'Restore defaults'}</button><span class="spacer"></span><button class="cancel" type="button">${zh ? '取消' : 'Cancel'}</button><button class="save" type="button">${zh ? '保存' : 'Save'}</button></footer>
+    </section>`
+
+  const panel = updateSettingsContent.querySelector<HTMLElement>('.panel')
+  const textarea = updateSettingsContent.querySelector<HTMLTextAreaElement>('.mirrors')
+  const fallback = updateSettingsContent.querySelector<HTMLInputElement>('.fallback input')
+  const error = updateSettingsContent.querySelector<HTMLElement>('.error')
+  if (!panel || !textarea || !fallback || !error) return
+  textarea.value = mirrors.join('\n')
+  fallback.checked = value.fallbackToGitHub !== false
+  const close = () => {
+    if (updateSettingsHost) updateSettingsHost.style.display = 'none'
+  }
+  updateSettingsContent.querySelector<HTMLButtonElement>('.close')?.addEventListener('click', close)
+  updateSettingsContent.querySelector<HTMLButtonElement>('.cancel')?.addEventListener('click', close)
+  updateSettingsContent.querySelector<HTMLButtonElement>('.reset')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget as HTMLButtonElement
+    button.disabled = true
+    try {
+      const restored = (await ipcRenderer.invoke('updates:config:reset')) as { mirrors?: unknown; fallbackToGitHub?: unknown }
+      textarea.value = Array.isArray(restored.mirrors) ? restored.mirrors.filter((item): item is string => typeof item === 'string').join('\n') : defaults.join('\n')
+      fallback.checked = restored.fallbackToGitHub !== false
+    } catch (cause) {
+      error.hidden = false
+      error.textContent = cause instanceof Error ? cause.message : String(cause)
+    } finally {
+      button.disabled = false
+    }
+  })
+  updateSettingsContent.querySelector<HTMLButtonElement>('.save')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget as HTMLButtonElement
+    const mirrorsToSave = textarea.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
+    button.disabled = true
+    error.hidden = true
+    try {
+      await ipcRenderer.invoke('updates:config:set', {
+        mirrors: mirrorsToSave,
+        fallbackToGitHub: fallback.checked
+      })
+      close()
+    } catch (cause) {
+      error.hidden = false
+      error.textContent = cause instanceof Error ? cause.message : String(cause)
+    } finally {
+      button.disabled = false
+    }
+  })
+  panel.addEventListener('click', (event) => {
+    if (event.target === panel) close()
+  })
+}
+
 function renderMobileButton(): void {
   const button = document.getElementById(MOBILE_BUTTON_ID) as HTMLButtonElement | null
   const root = document.querySelector<HTMLElement>('[data-dsh-sidebar-root]')
@@ -146,6 +281,7 @@ function initializeUi(): void {
   }
   mount()
   mountMobileButton()
+  mountUpdateSettingsButton()
   checkBootFailureInDom()
   domObserver.observe(document.documentElement, {
     childList: true,
@@ -460,6 +596,42 @@ const mobileButtonStyles = `
   #${MOBILE_BUTTON_ID}[hidden] { display:none; }
   #${MOBILE_BUTTON_ID} > span { position:absolute; top:4px; right:4px; width:7px; height:7px; border:1.5px solid var(--dsw-specific-sidebar-fill,#fff); border-radius:50%; background:#4da66d; opacity:0; }
   #${MOBILE_BUTTON_ID}.is-connected > span { opacity:1; }
+`
+
+const updateSettingsIcon = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="M12 4v3M12 17v3M4 12h3M17 12h3M6.35 6.35l2.1 2.1M15.55 15.55l2.1 2.1M17.65 6.35l-2.1 2.1M8.45 15.55l-2.1 2.1" stroke="currentColor" stroke-width="1.65" stroke-linecap="round"/><circle cx="12" cy="12" r="3.25" stroke="currentColor" stroke-width="1.65"/></svg>`
+
+const updateSettingsButtonStyles = `
+  [data-dsh-sidebar-settings] { position:relative; box-sizing:border-box; }
+  #${UPDATE_SETTINGS_BUTTON_ID} { appearance:none; position:relative; width:32px; height:32px; color:var(--dsw-alias-label-secondary,#73777f); background:transparent; border:0; border-radius:9px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+  [data-dsh-sidebar-root][data-dsh-sidebar-wide="true"] [data-dsh-sidebar-settings] { padding-right:76px; }
+  [data-dsh-sidebar-root][data-dsh-sidebar-wide="true"] #${UPDATE_SETTINGS_BUTTON_ID} { position:absolute; right:38px; top:50%; transform:translateY(-50%); }
+  #${UPDATE_SETTINGS_BUTTON_ID}:hover { color:var(--dsw-alias-label-primary,#202124); background:var(--dsw-alias-interactive-bg-hover,rgba(32,33,36,.08)); }
+  #${UPDATE_SETTINGS_BUTTON_ID}:focus-visible { outline:2px solid #4d6bfe; outline-offset:1px; }
+  #${UPDATE_SETTINGS_BUTTON_ID}[hidden] { display:none; }
+`
+
+const updateSettingsStyles = `
+  :host { color-scheme: light dark; }
+  * { box-sizing:border-box; }
+  .panel-wrap { position:fixed; inset:0; z-index:2147483647; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.42); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  .panel { width:min(560px,100%); color:var(--dsw-alias-label-primary,#202124); background:var(--dsw-alias-bg-layer-1,#fff); border:1px solid var(--dsw-alias-border-l2,rgba(32,33,36,.16)); border-radius:14px; padding:20px; box-shadow:0 20px 70px rgba(0,0,0,.3); }
+  header, footer { display:flex; align-items:center; gap:10px; }
+  header { justify-content:space-between; }
+  strong { font-size:16px; }
+  .close { appearance:none; width:28px; height:28px; border:0; border-radius:8px; color:inherit; background:transparent; font-size:21px; cursor:pointer; }
+  .close:hover { background:rgba(127,127,127,.12); }
+  .hint { margin:12px 0; color:var(--dsw-alias-label-secondary,#666b73); font-size:12.5px; line-height:18px; }
+  .small { margin-top:8px; }
+  .mirrors { width:100%; resize:vertical; min-height:116px; padding:10px; color:inherit; background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.1)); border:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.25)); border-radius:9px; font:12px/18px ui-monospace,SFMono-Regular,Consolas,monospace; }
+  .mirrors:focus { outline:2px solid #4d6bfe; outline-offset:1px; }
+  .fallback { display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; }
+  .error { margin-top:10px; color:#b42318; font-size:12px; line-height:17px; }
+  footer { margin-top:18px; }
+  footer button { min-height:32px; padding:6px 13px; border-radius:8px; border:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.25)); color:inherit; background:transparent; font:600 12px inherit; cursor:pointer; }
+  footer .save { color:#fff; background:#4d6bfe; border-color:#4d6bfe; }
+  footer button:disabled { opacity:.55; cursor:default; }
+  .spacer { flex:1; }
+  @media (prefers-color-scheme:dark) { .panel { color:var(--dsw-alias-label-primary,#f3f4f6); background:var(--dsw-alias-bg-layer-1,#1f2023); } .error { color:#fda29b; } }
 `
 
 ipcRenderer.on('updates:status-changed', (_event, status: UpdateStatus) => {

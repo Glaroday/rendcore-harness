@@ -35,6 +35,7 @@ import {
   uninstallPluginFromProfile
 } from './state/plugin-recovery'
 import { clearDamagedPackageDirectories, hasProfile } from './state/profile-repair'
+import { ensureStoreDirPinned, inspectStoreConsistency } from './state/profile-store'
 import {
   desktopHarnessUrl,
   isAbortedNavigationError,
@@ -740,6 +741,11 @@ async function repairProfilePackages(dshHome: string): Promise<void> {
   }
 }
 
+async function reportProfileStoreConsistency(dshHome: string): Promise<void> {
+  const finding = await inspectStoreConsistency(dshHome).catch(() => undefined)
+  if (finding) runtime.note(`[desktop] profile inconsistency: ${finding}`)
+}
+
 function launchHarness(): Promise<void> {
   if (harnessLaunchOperation) return harnessLaunchOperation
 
@@ -747,8 +753,13 @@ function launchHarness(): Promise<void> {
     const dshHome = join(app.getPath('userData'), 'harness')
     await showSplash()
     await runtime.stop()
+    // Pin pnpm to the store that created this profile before any repair or
+    // plugin operation can otherwise fail with ERR_PNPM_UNEXPECTED_STORE.
+    const pinned = await ensureStoreDirPinned(dshHome).catch(() => undefined)
+    if (pinned) runtime.note(`[desktop] pinned the profile's pnpm store: ${pinned}`)
     await repairProfilePackages(dshHome)
     await pruneMissingProfileBundles(dshHome).catch(() => false)
+    await reportProfileStoreConsistency(dshHome)
     await syncBundledProfilePackages(dshHome)
     await syncModsearchConfiguration()
     await syncProfileBranding(dshHome)

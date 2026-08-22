@@ -1,5 +1,12 @@
 import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
-import { readUpdateFeedConfig, type UpdateFeedConfig } from './update-feed'
+import {
+  DEFAULT_UPDATE_FEED_CONFIG,
+  readUpdateFeedConfig,
+  resetUpdateFeedConfig,
+  writeUpdateFeedConfig,
+  type UpdateFeedConfig,
+  type UpdateFeedSettings
+} from './update-feed'
 import electronUpdater from 'electron-updater'
 import type { UpdateStatus } from '../../shared/contracts'
 import {
@@ -39,8 +46,37 @@ export function getUpdateStatus(): UpdateStatus {
 export function registerUpdateHandlers(): void {
   if (handlersRegistered) return
   handlersRegistered = true
+  // Load settings before the Harness window is shown so the panel is useful
+  // in development builds too; the packaged updater refreshes this again.
+  updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:install', () => installDownloadedUpdate())
+  ipcMain.handle('updates:config:get', () => ({
+    mirrors: updateFeedConfig.feedUrls,
+    fallbackToGitHub: updateFeedConfig.fallbackToGitHub,
+    defaults: DEFAULT_UPDATE_FEED_CONFIG.feedUrls
+  }))
+  ipcMain.handle('updates:config:set', async (_event, value: unknown) => {
+    const settings = parseUpdateFeedSettings(value)
+    updateFeedConfig = await writeUpdateFeedConfig(app.getPath('userData'), settings)
+    activeMirrorIndex = -1
+    configureFirstFeed()
+    return {
+      mirrors: updateFeedConfig.feedUrls,
+      fallbackToGitHub: updateFeedConfig.fallbackToGitHub,
+      defaults: DEFAULT_UPDATE_FEED_CONFIG.feedUrls
+    }
+  })
+  ipcMain.handle('updates:config:reset', async () => {
+    updateFeedConfig = await resetUpdateFeedConfig(app.getPath('userData'))
+    activeMirrorIndex = -1
+    configureFirstFeed()
+    return {
+      mirrors: updateFeedConfig.feedUrls,
+      fallbackToGitHub: updateFeedConfig.fallbackToGitHub,
+      defaults: DEFAULT_UPDATE_FEED_CONFIG.feedUrls
+    }
+  })
 }
 
 export function startUpdateManager(options: { prepareToInstall: () => Promise<void> }): void {
@@ -124,12 +160,7 @@ export function stopUpdateManager(): void {
 function configureUpdater(): void {
   updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
   activeMirrorIndex = -1
-  const firstFeed = updateFeedConfig.feedUrls[0]
-  if (firstFeed) {
-    configureMirrorFeed(firstFeed)
-    activeMirrorIndex = 0
-    console.info('[updater] using configured update mirror', updateFeedConfig.feedUrls[0])
-  }
+  configureFirstFeed()
 
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = AUTO_INSTALL_ON_APP_QUIT
@@ -161,6 +192,31 @@ function configureUpdater(): void {
     transition({ type: 'error', message: errorMessage(error) })
     if (status.manual) scheduleReset()
   })
+}
+
+function configureFirstFeed(): void {
+  const firstFeed = updateFeedConfig.feedUrls[0]
+  if (firstFeed) {
+    configureMirrorFeed(firstFeed)
+    activeMirrorIndex = 0
+    console.info('[updater] using configured update mirror', updateFeedConfig.feedUrls[0])
+  } else {
+    // An empty list means direct GitHub in the settings UI, regardless of the
+    // fallback toggle; there is otherwise no feed for electron-updater to use.
+    configureGitHubFeed()
+  }
+}
+
+function parseUpdateFeedSettings(value: unknown): UpdateFeedSettings {
+  if (!value || typeof value !== 'object') throw new Error('Invalid update mirror settings.')
+  const raw = value as { mirrors?: unknown; fallbackToGitHub?: unknown }
+  if (!Array.isArray(raw.mirrors) || raw.mirrors.some((mirror) => typeof mirror !== 'string')) {
+    throw new Error('Update mirrors must be an array of URLs.')
+  }
+  return {
+    mirrors: raw.mirrors.map((mirror) => mirror.trim()).filter(Boolean),
+    fallbackToGitHub: raw.fallbackToGitHub !== false
+  }
 }
 
 async function checkUsingConfiguredFeeds(): Promise<void> {

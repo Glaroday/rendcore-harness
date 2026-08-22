@@ -68,6 +68,12 @@ export function buildHarnessSpawnOptions(
       ...parentEnvironment,
       DSH_HOME: dshHome,
       NO_COLOR: '1',
+      // Keep pnpm's child processes bounded and preserve the same behavior
+      // when it is launched through Electron's bundled Node runtime.
+      PNPM_MAX_WORKERS: '1',
+      npm_config_child_concurrency: '1',
+      npm_config_package_import_method: 'clone-or-copy',
+      npm_config_side_effects_cache: 'false',
       PNPM_CONFIG_CHILD_CONCURRENCY: '1',
       PNPM_CONFIG_PACKAGE_IMPORT_METHOD: 'clone-or-copy',
       PNPM_CONFIG_SIDE_EFFECTS_CACHE: 'false',

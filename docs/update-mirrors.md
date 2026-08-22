@@ -32,3 +32,4 @@ RendCore Harness 默认按顺序尝试两个已验证的镜像，然后回退到
 删除这个文件即可恢复内置镜像。把 `mirrors` 改为空数组即可跳过镜像、直接使用 GitHub。高级用户也可以设置环境变量 `RENDCORE_UPDATE_FEED_URL`，它会优先于文件中的地址。
 
 配置在应用启动时读取，修改后重启 RendCore Harness 即可生效。
+You can edit these feeds directly from the **Update mirror settings** button in the Harness sidebar. Changes are saved immediately and apply to the next update check.

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { mkdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export interface UpdateFeedConfig {
@@ -9,6 +10,11 @@ export interface UpdateFeedConfig {
 }
 
 export const UPDATE_CONFIG_FILENAME = 'update-config.json'
+
+export interface UpdateFeedSettings {
+  mirrors: string[]
+  fallbackToGitHub: boolean
+}
 
 export const DEFAULT_UPDATE_FEED_CONFIG: UpdateFeedConfig = {
   // Verified on 2026-08-22: both feeds served latest.yml and the referenced
@@ -84,4 +90,37 @@ export function readUpdateFeedConfig(userDataPath: string, envFeedUrl = process.
     config.feedUrls = [environmentFeed, ...config.feedUrls.filter((url) => url !== environmentFeed)]
   }
   return config
+}
+
+/** Persist settings written by the in-app update mirror panel. */
+export async function writeUpdateFeedConfig(
+  userDataPath: string,
+  settings: UpdateFeedSettings
+): Promise<UpdateFeedConfig> {
+  if (!Array.isArray(settings.mirrors) || settings.mirrors.some((value) => typeof value !== 'string')) {
+    throw new Error('Update mirrors must be an array of URLs.')
+  }
+
+  const normalized = settings.mirrors.map(normalizeUpdateFeedUrl)
+  if (normalized.some((value) => value === undefined)) {
+    throw new Error('Every update mirror must be a valid HTTP(S) URL.')
+  }
+
+  const config: UpdateFeedConfig = {
+    feedUrls: [...new Set(normalized.filter((value): value is string => Boolean(value)))],
+    fallbackToGitHub: settings.fallbackToGitHub !== false
+  }
+  await mkdir(userDataPath, { recursive: true })
+  await writeFile(
+    join(userDataPath, UPDATE_CONFIG_FILENAME),
+    `${JSON.stringify({ mirrors: config.feedUrls, fallbackToGitHub: config.fallbackToGitHub }, null, 2)}\n`,
+    'utf8'
+  )
+  return config
+}
+
+/** Remove the override so the release's built-in mirror list is active again. */
+export async function resetUpdateFeedConfig(userDataPath: string): Promise<UpdateFeedConfig> {
+  await unlink(join(userDataPath, UPDATE_CONFIG_FILENAME)).catch(() => undefined)
+  return { ...DEFAULT_UPDATE_FEED_CONFIG, feedUrls: [...DEFAULT_UPDATE_FEED_CONFIG.feedUrls] }
 }
