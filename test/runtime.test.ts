@@ -12,6 +12,9 @@ import {
   extractSlotConflictName,
   formatExitCode,
   knownRendCoreReasoningEfforts,
+  materializeRendCoreModel,
+  parseRendCoreModelCapabilities,
+  reasoningEffortsFromThinking,
   replaceRendCoreModelBlock,
   resolveRendCoreReasoningEfforts,
   updateReadyStability
@@ -79,6 +82,77 @@ describe('Harness launch contract', () => {
         reasoning_efforts: { low: 'budget-low', high: 'budget-high' }
       })
     ).toEqual({ low: 'budget-low', high: 'budget-high' })
+  })
+
+  it('parses context, output and thinking levels from the RendCore capability API', () => {
+    const models = parseRendCoreModelCapabilities({
+      models: [
+        {
+          configured: true,
+          context: 200_000,
+          display_name: 'GPT-5.6 Sol',
+          id: 'gpt-5.6-sol',
+          max_output: 64_000,
+          thinking: ['low', 'high', 'max']
+        },
+        {
+          configured: false,
+          context: 1_000_000,
+          id: 'offline-model',
+          max_output: 64_000,
+          thinking: ['high']
+        },
+        {
+          configured: true,
+          context: 32_768,
+          id: 'gpt-image-2',
+          max_output: 4_096,
+          thinking: ['none']
+        }
+      ]
+    })
+
+    expect(models).toEqual([
+      {
+        id: 'gpt-5.6-sol',
+        name: 'GPT-5.6 Sol',
+        contextWindow: 200_000,
+        maxTokens: 64_000,
+        input: ['text', 'image'],
+        reasoningEfforts: { low: 'low', high: 'high', max: 'max' }
+      }
+    ])
+  })
+
+  it('uses capability API values ahead of /v1/models and built-in guesses', () => {
+    const capability = parseRendCoreModelCapabilities({
+      models: [{
+        configured: true,
+        context: 200_000,
+        display_name: 'GPT-5.6 Sol',
+        id: 'gpt-5.6-sol',
+        max_output: 64_000,
+        thinking: ['low', 'high', 'max']
+      }]
+    })[0]
+
+    expect(
+      materializeRendCoreModel(
+        'gpt-5.6-sol',
+        { context_window: 999_999, max_output_tokens: 99_999 },
+        capability
+      )
+    ).toMatchObject({
+      name: 'GPT-5.6 Sol',
+      contextWindow: 200_000,
+      maxTokens: 64_000,
+      reasoningEfforts: { low: 'low', high: 'high', max: 'max' }
+    })
+  })
+
+  it('maps the capability API none level to an off choice only when reasoning exists', () => {
+    expect(reasoningEffortsFromThinking(['low', 'none'])).toEqual({ low: 'low', off: 'none' })
+    expect(reasoningEffortsFromThinking(['none'])).toBe(false)
   })
 
   it('does not treat a briefly reachable port as a completed Harness startup', () => {

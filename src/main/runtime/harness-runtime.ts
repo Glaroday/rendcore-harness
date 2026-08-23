@@ -8,6 +8,7 @@ import { parse, stringify } from 'yaml'
 import type { RuntimePhase, RuntimeSnapshot } from '../../shared/contracts'
 
 export const RENDCORE_MODELS_ENDPOINT = 'http://47.103.24.134:18036/v1/models'
+export const RENDCORE_MODEL_CAPABILITIES_ENDPOINT = 'http://47.103.24.134:8600/api/models'
 const RENDCORE_SAFE_DEFAULT_MODEL = 'gpt-5.6-sol'
 
 export interface HarnessRuntimeOptions {
@@ -176,7 +177,22 @@ export class HarnessRuntime {
     await mkdir(dirname(this.options.logPath), { recursive: true })
     this.logStream = createWriteStream(this.options.logPath, { flags: 'a' })
 
-    const apiKey = await readStoredRendCoreApiKey(this.options.dshHome)
+    const [apiKey, capabilityResult] = await Promise.all([
+      readStoredRendCoreApiKey(this.options.dshHome),
+      fetchRendCoreModelCapabilities().then(
+        (models) => ({ models }),
+        (error: unknown) => ({
+          models: [] as OnlineModelEntry[],
+          error: error instanceof Error ? error.message : String(error)
+        })
+      )
+    ])
+    const capabilityModels = capabilityResult.models
+    if ('error' in capabilityResult) {
+      this.writeLog(`[desktop] RendCore capability discovery failed: ${capabilityResult.error}`)
+    } else {
+      this.writeLog(`[desktop] loaded capabilities for ${capabilityModels.length} RendCore models`)
+    }
     const cachedPath = join(this.options.dshHome, 'rendcore-online.patch.yml')
     let patchPath = this.options.dshPatchPath
 
@@ -186,7 +202,12 @@ export class HarnessRuntime {
     let onlineCatalog: OnlinePatchResult | undefined
     if (apiKey) {
       try {
-        onlineCatalog = await createOnlineRendCorePatch(this.options.dshPatchPath, this.options.dshHome, apiKey)
+        onlineCatalog = await createOnlineRendCorePatch(
+          this.options.dshPatchPath,
+          this.options.dshHome,
+          apiKey,
+          capabilityModels
+        )
         patchPath = onlineCatalog.path
         await syncStoredRendCoreModels(this.options.dshHome, onlineCatalog.models)
         this.writeLog(`[desktop] refreshed ${onlineCatalog.modelCount} models from RendCore /v1/models`)
@@ -204,7 +225,8 @@ export class HarnessRuntime {
           const cachedCatalog = await createCachedRendCorePatch(
             this.options.dshPatchPath,
             this.options.dshHome,
-            cachedPath
+            cachedPath,
+            capabilityModels
           )
           patchPath = cachedCatalog.path
           await syncStoredRendCoreModels(this.options.dshHome, cachedCatalog.models)
@@ -216,6 +238,15 @@ export class HarnessRuntime {
             }`
           )
         }
+      } else if (capabilityModels.length > 0) {
+        const capabilityCatalog = await createCapabilityRendCorePatch(
+          this.options.dshPatchPath,
+          this.options.dshHome,
+          capabilityModels
+        )
+        patchPath = capabilityCatalog.path
+        await syncStoredRendCoreModels(this.options.dshHome, capabilityCatalog.models)
+        this.writeLog('[desktop] using RendCore capability catalog')
       } else {
         this.writeLog('[desktop] using bundled RendCore model catalog')
       }
@@ -375,6 +406,7 @@ interface OnlineModelResponse {
 
 interface OnlineModelEntry {
   id: string
+  name?: string
   contextWindow?: number
   maxTokens?: number
   input?: Array<'text' | 'image'>
@@ -387,10 +419,109 @@ interface OnlinePatchResult {
   models: OnlineModelEntry[]
 }
 
+export function parseRendCoreModelCapabilities(payload: unknown): OnlineModelEntry[] {
+  if (!payload || typeof payload !== 'object') return []
+  const entries = (payload as Record<string, unknown>).models
+  if (!Array.isArray(entries)) return []
+
+  return entries
+    .map((entry): OnlineModelEntry | undefined => {
+      if (!entry || typeof entry !== 'object') return undefined
+      const value = entry as Record<string, unknown>
+      if (value.configured === false) return undefined
+      const id = typeof value.id === 'string' ? value.id.trim() : ''
+      if (!id || isImageGenerationOnlyModel(id, value)) return undefined
+      const displayName = typeof value.display_name === 'string' ? value.display_name.trim() : ''
+      const contextWindow = positiveInteger(value.context)
+      const maxTokens = positiveInteger(value.max_output)
+      const reasoningEfforts = reasoningEffortsFromThinking(value.thinking)
+      const known = knownModelCapabilities(id)
+      return {
+        id,
+        ...(displayName ? { name: displayName } : {}),
+        ...(contextWindow === undefined ? {} : { contextWindow }),
+        ...(maxTokens === undefined ? {} : { maxTokens }),
+        input: known?.input ?? inferModelInput(id) ?? ['text'],
+        ...(reasoningEfforts === undefined ? {} : { reasoningEfforts })
+      }
+    })
+    .filter((model): model is OnlineModelEntry => model !== undefined)
+    .filter((model, index, all) =>
+      all.findIndex((candidate) => candidate.id.toLowerCase() === model.id.toLowerCase()) === index
+    )
+}
+
+async function fetchRendCoreModelCapabilities(): Promise<OnlineModelEntry[]> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 8_000)
+  try {
+    const response = await fetch(RENDCORE_MODEL_CAPABILITIES_ENDPOINT, { signal: controller.signal })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const models = parseRendCoreModelCapabilities(await response.json())
+    if (models.length === 0) throw new Error('the endpoint returned no configured model capabilities')
+    return models
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function indexRendCoreCapabilities(
+  models: readonly OnlineModelEntry[]
+): Map<string, OnlineModelEntry> {
+  return new Map(models.map((model) => [model.id.toLowerCase(), model]))
+}
+
+export function materializeRendCoreModel(
+  id: string,
+  value: Record<string, unknown> | undefined,
+  capability: OnlineModelEntry | undefined
+): OnlineModelEntry {
+  const known = knownModelCapabilities(id)
+  const displayName = value && typeof value.name === 'string' ? value.name.trim() : ''
+  const contextWindow = capability?.contextWindow ?? positiveInteger(
+    value?.context_window ?? value?.contextWindow ?? value?.context_length ?? value?.contextLength
+  ) ?? known?.contextWindow
+  const maxTokens = capability?.maxTokens ?? positiveInteger(
+    value?.max_tokens ?? value?.maxTokens ?? value?.max_output_tokens ?? value?.maxOutputTokens
+  ) ?? known?.maxTokens
+  const input = known?.input ?? (value ? resolveModelInput(value, id) : inferModelInput(id)) ?? ['text']
+  const reasoningEfforts = capability?.reasoningEfforts ?? (
+    value ? resolveRendCoreReasoningEfforts(id, value) : known?.reasoningEfforts
+  )
+  return {
+    id,
+    name: capability?.name || displayName || id,
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+    input,
+    ...(reasoningEfforts === undefined ? {} : { reasoningEfforts })
+  }
+}
+
+function renderRendCoreModelBlock(models: readonly OnlineModelEntry[]): string {
+  return models
+    .map((model) => [
+      `          - id: ${JSON.stringify(model.id)}`,
+      `            name: ${JSON.stringify(model.name ?? model.id)}`,
+      ...(model.contextWindow === undefined ? [] : [`            contextWindow: ${model.contextWindow}`]),
+      ...(model.maxTokens === undefined ? [] : [`            maxTokens: ${model.maxTokens}`]),
+      ...(model.input === undefined ? [] : [`            input: ${JSON.stringify(model.input)}`]),
+      ...(model.reasoningEfforts === undefined
+        ? []
+        : [
+            `            reasoningEfforts: ${
+              model.reasoningEfforts === false ? 'false' : JSON.stringify(model.reasoningEfforts)
+            }`
+          ])
+    ].join('\n'))
+    .join('\n')
+}
+
 async function createOnlineRendCorePatch(
   basePatchPath: string,
   dshHome: string,
-  apiKey?: string
+  apiKey: string | undefined,
+  capabilities: readonly OnlineModelEntry[]
 ): Promise<OnlinePatchResult> {
   if (!apiKey?.trim()) {
     throw new Error('RendCore API key is not configured; enter it in Settings > Models')
@@ -404,6 +535,7 @@ async function createOnlineRendCorePatch(
     })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const payload = (await response.json()) as OnlineModelResponse
+    const capabilityById = indexRendCoreCapabilities(capabilities)
     const models = Array.isArray(payload.data)
       ? payload.data
           .map((entry): OnlineModelEntry | undefined => {
@@ -411,61 +543,24 @@ async function createOnlineRendCorePatch(
               const id = entry.trim()
               if (id.length === 0) return undefined
               if (isImageGenerationOnlyModel(id)) return undefined
-              const known = knownModelCapabilities(id)
-              return {
-                id,
-                ...(known?.contextWindow === undefined ? {} : { contextWindow: known.contextWindow }),
-                ...(known?.maxTokens === undefined ? {} : { maxTokens: known.maxTokens }),
-                input: known?.input ?? inferModelInput(id) ?? ['text'],
-                ...(known?.reasoningEfforts === undefined
-                  ? {}
-                  : { reasoningEfforts: known.reasoningEfforts })
-              }
+              return materializeRendCoreModel(id, undefined, capabilityById.get(id.toLowerCase()))
             }
             if (!entry || typeof entry !== 'object') return undefined
             const value = entry as Record<string, unknown>
             const id = typeof value.id === 'string' ? value.id.trim() : ''
             if (id.length === 0) return undefined
             if (isImageGenerationOnlyModel(id, value)) return undefined
-            const known = knownModelCapabilities(id)
-            const contextWindow = known?.contextWindow ?? positiveInteger(
-              value.context_window ?? value.contextWindow ?? value.context_length ?? value.contextLength
-            )
-            const maxTokens = known?.maxTokens ?? positiveInteger(
-              value.max_tokens ?? value.maxTokens ?? value.max_output_tokens ?? value.maxOutputTokens
-            )
-            const input = known?.input ?? resolveModelInput(value, id)
-            const reasoningEfforts = resolveRendCoreReasoningEfforts(id, value)
-            return {
-              id,
-              ...(contextWindow === undefined ? {} : { contextWindow }),
-              ...(maxTokens === undefined ? {} : { maxTokens }),
-              ...(input === undefined ? {} : { input }),
-              ...(reasoningEfforts === undefined ? {} : { reasoningEfforts })
-            }
+            return materializeRendCoreModel(id, value, capabilityById.get(id.toLowerCase()))
           })
           .filter((model): model is OnlineModelEntry => model !== undefined)
-          .filter((model, index, all) => all.findIndex((candidate) => candidate.id === model.id) === index)
+          .filter((model, index, all) =>
+            all.findIndex((candidate) => candidate.id.toLowerCase() === model.id.toLowerCase()) === index
+          )
       : []
     if (models.length === 0) throw new Error('the endpoint returned no model ids')
 
     const source = await readFile(basePatchPath, 'utf8')
-    const modelBlock = models
-      .map((model) => [
-        `          - id: ${JSON.stringify(model.id)}`,
-        `            name: ${JSON.stringify(model.id)}`,
-        ...(model.contextWindow === undefined ? [] : [`            contextWindow: ${model.contextWindow}`]),
-        ...(model.maxTokens === undefined ? [] : [`            maxTokens: ${model.maxTokens}`]),
-        ...(model.input === undefined ? [] : [`            input: ${JSON.stringify(model.input)}`]),
-        ...(model.reasoningEfforts === undefined
-          ? []
-          : [
-              `            reasoningEfforts: ${
-                model.reasoningEfforts === false ? 'false' : JSON.stringify(model.reasoningEfforts)
-              }`
-            ])
-      ].join('\n'))
-      .join('\n')
+    const modelBlock = renderRendCoreModelBlock(models)
     const dynamicPatch = replaceRendCoreModelBlock(source, modelBlock)
     const dynamicPath = join(dshHome, 'rendcore-online.patch.yml')
     await writeFile(dynamicPath, dynamicPatch, 'utf8')
@@ -473,6 +568,19 @@ async function createOnlineRendCorePatch(
   } finally {
     clearTimeout(timeout)
   }
+}
+
+async function createCapabilityRendCorePatch(
+  basePatchPath: string,
+  dshHome: string,
+  capabilities: readonly OnlineModelEntry[]
+): Promise<OnlinePatchResult> {
+  const source = await readFile(basePatchPath, 'utf8')
+  const models = capabilities.filter((model) => !isImageGenerationOnlyModel(model.id))
+  const dynamicPatch = replaceRendCoreModelBlock(source, renderRendCoreModelBlock(models))
+  const dynamicPath = join(dshHome, 'rendcore-online.patch.yml')
+  await writeFile(dynamicPath, dynamicPatch, 'utf8')
+  return { path: dynamicPath, modelCount: models.length, models: [...models] }
 }
 
 /** Replace a user-layer RendCore catalog after a successful online refresh. */
@@ -494,7 +602,7 @@ async function syncStoredRendCoreModels(dshHome: string, models: OnlineModelEntr
 
   const nextModels = models.map((model) => ({
     id: model.id,
-    name: model.id,
+    name: model.name ?? model.id,
     ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
     ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
     ...(model.input === undefined ? {} : { input: model.input }),
@@ -509,7 +617,8 @@ async function syncStoredRendCoreModels(dshHome: string, models: OnlineModelEntr
 async function createCachedRendCorePatch(
   basePatchPath: string,
   dshHome: string,
-  cachedPath: string
+  cachedPath: string,
+  capabilities: readonly OnlineModelEntry[]
 ): Promise<OnlinePatchResult> {
   const [baseSource, cachedSource] = await Promise.all([
     readFile(basePatchPath, 'utf8'),
@@ -531,33 +640,11 @@ async function createCachedRendCorePatch(
     .filter((id) => !isImageGenerationOnlyModel(id))
   if (ids.length === 0) throw new Error('cached RendCore model block was empty')
 
-  const models = ids.map((id): OnlineModelEntry => {
-    const known = knownModelCapabilities(id)
-    return {
-      id,
-      ...(known?.contextWindow === undefined ? {} : { contextWindow: known.contextWindow }),
-      ...(known?.maxTokens === undefined ? {} : { maxTokens: known.maxTokens }),
-      input: known?.input ?? inferModelInput(id) ?? ['text'],
-      ...(known?.reasoningEfforts === undefined
-        ? {}
-        : { reasoningEfforts: known.reasoningEfforts })
-    }
-  })
-  const modelBlock = models
-    .map((model) => [
-      '          - id: ' + JSON.stringify(model.id),
-      '            name: ' + JSON.stringify(model.id),
-      ...(model.contextWindow === undefined ? [] : ['            contextWindow: ' + model.contextWindow]),
-      ...(model.maxTokens === undefined ? [] : ['            maxTokens: ' + model.maxTokens]),
-      ...(model.input === undefined ? [] : ['            input: ' + JSON.stringify(model.input)]),
-      ...(model.reasoningEfforts === undefined
-        ? []
-        : [
-            '            reasoningEfforts: ' +
-              (model.reasoningEfforts === false ? 'false' : JSON.stringify(model.reasoningEfforts))
-          ])
-    ].join('\n'))
-    .join('\n')
+  const capabilityById = indexRendCoreCapabilities(capabilities)
+  const models = ids.map((id) =>
+    materializeRendCoreModel(id, undefined, capabilityById.get(id.toLowerCase()))
+  )
+  const modelBlock = renderRendCoreModelBlock(models)
   const dynamicPatch = replaceRendCoreModelBlock(baseSource, modelBlock)
   await writeFile(cachedPath, dynamicPatch, 'utf8')
   return { path: cachedPath, modelCount: models.length, models }
@@ -736,6 +823,31 @@ function resolveReasoningEfforts(value: Record<string, unknown>): false | Record
     return Object.keys(result).length > 0 ? result : undefined
   }
   return undefined
+}
+
+export function reasoningEffortsFromThinking(
+  value: unknown
+): false | Record<string, string | null> | undefined {
+  if (!Array.isArray(value)) return undefined
+  const efforts: Record<string, string | null> = {}
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const wireValue = item.trim().toLowerCase()
+    if (wireValue === 'none' || wireValue === 'off') {
+      efforts.off = wireValue
+    } else if (
+      wireValue === 'minimal' ||
+      wireValue === 'low' ||
+      wireValue === 'medium' ||
+      wireValue === 'high' ||
+      wireValue === 'xhigh' ||
+      wireValue === 'max'
+    ) {
+      efforts[wireValue] = wireValue
+    }
+  }
+  if (!Object.keys(efforts).some((effort) => effort !== 'off')) return false
+  return efforts
 }
 
 export function resolveRendCoreReasoningEfforts(
