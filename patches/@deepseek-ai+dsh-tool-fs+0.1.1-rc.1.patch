@@ -1,0 +1,32 @@
+diff --git a/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js b/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js
+index f9fedc1..57d39b6 100644
+--- a/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js
+@@ -1,7 +1,7 @@
+ import z from "@deepseek-ai/schemastery";
+ import { defineTool } from "@deepseek-ai/dsh-tools";
+ import { FsError } from "@deepseek-ai/dsh-fs";
+-import { ESCALATION_TARGETS, approveEscalation, canonicalPath, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs } from "@deepseek-ai/dsh-sandbox";
++import { ESCALATION_TARGETS, approveEscalation, canonicalPath, escalationHintMarker, normalizeEscalationArgs, sandboxDenialMarker } from "@deepseek-ai/dsh-sandbox";
+ import { structuredPatch } from "diff";
+ import { basename, extname } from "node:path";
+ import { AttachmentError, AttachmentId } from "@deepseek-ai/dsh-attachment";
+@@ -1120,14 +1120,14 @@ var FsSandboxController = class {
+ 	*   unsandboxed backend.
+ 	*/
+ 	async resolvePolicy(toolName, args, exec) {
+-		validateEscalationArgs(args.sandbox_permissions, args.justification);
+ 		const standingPolicy = this.policy?.resolve({ ...exec.agent ? { session: exec.agent.session } : {} });
+-		if (args.sandbox_permissions === void 0 || args.justification === void 0) return standingPolicy;
++		const escalation = normalizeEscalationArgs(args.sandbox_permissions, args.justification, standingPolicy?.mode);
++		if (escalation.sandboxPermissions === void 0 || escalation.justification === void 0) return standingPolicy;
+ 		if (this.escalationModes.length === 0) throw new Error("sandbox_permissions is not available in this composition (no sandboxing filesystem to escalate)");
+ 		const policy = standingPolicy;
+ 		const approvedMode = await approveEscalation({
+-			requestedMode: args.sandbox_permissions,
+-			justification: args.justification,
++			requestedMode: escalation.sandboxPermissions,
++			justification: escalation.justification,
+ 			effectiveMode: policy.mode,
+ 			subject: "operation"
+ 		}, {
