@@ -11,7 +11,9 @@ import {
   extractRendCoreModelBlock,
   extractSlotConflictName,
   formatExitCode,
+  knownRendCoreReasoningEfforts,
   replaceRendCoreModelBlock,
+  resolveRendCoreReasoningEfforts,
   updateReadyStability
 } from '../src/main/runtime/harness-runtime'
 import { canGrantWindowPermission, isTrustedAppUrl } from '../src/main/security-policy'
@@ -50,6 +52,33 @@ describe('Harness launch contract', () => {
     expect(updated).toContain('# Keep this plugin section after the model catalog.\r\n- insert:')
     expect(updated).toContain('    - id: model-fix')
     expect(extractRendCoreModelBlock(updated)).toContain('new-model')
+  })
+
+  it('declares selectable reasoning levels for known RendCore GPT models', () => {
+    expect(knownRendCoreReasoningEfforts('gpt-5.6-sol')).toEqual({
+      low: 'low',
+      medium: 'medium',
+      high: 'high',
+      xhigh: 'xhigh',
+      max: 'max'
+    })
+    expect(knownRendCoreReasoningEfforts('gpt-5.4-mini')).toEqual({
+      low: 'low',
+      medium: 'medium',
+      high: 'high'
+    })
+    expect(knownRendCoreReasoningEfforts('gpt-oss-120b-medium')).toBeUndefined()
+  })
+
+  it('lets endpoint reasoning metadata override the known-model fallback', () => {
+    expect(
+      resolveRendCoreReasoningEfforts('gpt-5.6-sol', { supports_reasoning: false })
+    ).toBe(false)
+    expect(
+      resolveRendCoreReasoningEfforts('custom-model', {
+        reasoning_efforts: { low: 'budget-low', high: 'budget-high' }
+      })
+    ).toEqual({ low: 'budget-low', high: 'budget-high' })
   })
 
   it('does not treat a briefly reachable port as a completed Harness startup', () => {

@@ -201,11 +201,13 @@ export class HarnessRuntime {
     if (!onlineCatalog) {
       if (existsSync(cachedPath)) {
         try {
-          patchPath = (await createCachedRendCorePatch(
+          const cachedCatalog = await createCachedRendCorePatch(
             this.options.dshPatchPath,
             this.options.dshHome,
             cachedPath
-          )).path
+          )
+          patchPath = cachedCatalog.path
+          await syncStoredRendCoreModels(this.options.dshHome, cachedCatalog.models)
           this.writeLog('[desktop] using cached RendCore model catalog')
         } catch (error) {
           this.writeLog(
@@ -414,7 +416,10 @@ async function createOnlineRendCorePatch(
                 id,
                 ...(known?.contextWindow === undefined ? {} : { contextWindow: known.contextWindow }),
                 ...(known?.maxTokens === undefined ? {} : { maxTokens: known.maxTokens }),
-                input: known?.input ?? inferModelInput(id) ?? ['text']
+                input: known?.input ?? inferModelInput(id) ?? ['text'],
+                ...(known?.reasoningEfforts === undefined
+                  ? {}
+                  : { reasoningEfforts: known.reasoningEfforts })
               }
             }
             if (!entry || typeof entry !== 'object') return undefined
@@ -430,7 +435,7 @@ async function createOnlineRendCorePatch(
               value.max_tokens ?? value.maxTokens ?? value.max_output_tokens ?? value.maxOutputTokens
             )
             const input = known?.input ?? resolveModelInput(value, id)
-            const reasoningEfforts = resolveReasoningEfforts(value)
+            const reasoningEfforts = resolveRendCoreReasoningEfforts(id, value)
             return {
               id,
               ...(contextWindow === undefined ? {} : { contextWindow }),
@@ -532,7 +537,10 @@ async function createCachedRendCorePatch(
       id,
       ...(known?.contextWindow === undefined ? {} : { contextWindow: known.contextWindow }),
       ...(known?.maxTokens === undefined ? {} : { maxTokens: known.maxTokens }),
-      input: known?.input ?? inferModelInput(id) ?? ['text']
+      input: known?.input ?? inferModelInput(id) ?? ['text'],
+      ...(known?.reasoningEfforts === undefined
+        ? {}
+        : { reasoningEfforts: known.reasoningEfforts })
     }
   })
   const modelBlock = models
@@ -541,7 +549,13 @@ async function createCachedRendCorePatch(
       '            name: ' + JSON.stringify(model.id),
       ...(model.contextWindow === undefined ? [] : ['            contextWindow: ' + model.contextWindow]),
       ...(model.maxTokens === undefined ? [] : ['            maxTokens: ' + model.maxTokens]),
-      ...(model.input === undefined ? [] : ['            input: ' + JSON.stringify(model.input)])
+      ...(model.input === undefined ? [] : ['            input: ' + JSON.stringify(model.input)]),
+      ...(model.reasoningEfforts === undefined
+        ? []
+        : [
+            '            reasoningEfforts: ' +
+              (model.reasoningEfforts === false ? 'false' : JSON.stringify(model.reasoningEfforts))
+          ])
     ].join('\n'))
     .join('\n')
   const dynamicPatch = replaceRendCoreModelBlock(baseSource, modelBlock)
@@ -623,16 +637,51 @@ function inferModelInput(id: string): Array<'text' | 'image'> | undefined {
   return undefined
 }
 
-function knownModelCapabilities(id: string): OnlineModelEntry | undefined {
-  const normalized = id.toLowerCase()
+export function knownRendCoreReasoningEfforts(
+  id: string
+): Record<string, string | null> | undefined {
+  const normalized = id.trim().toLowerCase()
   if (/^gpt-5\.6-(sol|terra|luna)$/.test(normalized)) {
-    return { id, contextWindow: 1_050_000, maxTokens: 128_000, input: ['text', 'image'] }
+    return { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' }
   }
   if (normalized === 'gpt-5.5' || normalized === 'gpt-5.4') {
-    return { id, contextWindow: 1_050_000, maxTokens: 128_000, input: ['text', 'image'] }
+    return { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' }
   }
   if (normalized === 'gpt-5.4-mini' || normalized.includes('gpt-5.3-codex')) {
-    return { id, contextWindow: 400_000, maxTokens: 128_000, input: ['text', 'image'] }
+    return { low: 'low', medium: 'medium', high: 'high' }
+  }
+  return undefined
+}
+
+function knownModelCapabilities(id: string): OnlineModelEntry | undefined {
+  const normalized = id.toLowerCase()
+  const reasoningEfforts = knownRendCoreReasoningEfforts(normalized)
+  if (/^gpt-5\.6-(sol|terra|luna)$/.test(normalized)) {
+    return {
+      id,
+      contextWindow: 1_050_000,
+      maxTokens: 128_000,
+      input: ['text', 'image'],
+      reasoningEfforts
+    }
+  }
+  if (normalized === 'gpt-5.5' || normalized === 'gpt-5.4') {
+    return {
+      id,
+      contextWindow: 1_050_000,
+      maxTokens: 128_000,
+      input: ['text', 'image'],
+      reasoningEfforts
+    }
+  }
+  if (normalized === 'gpt-5.4-mini' || normalized.includes('gpt-5.3-codex')) {
+    return {
+      id,
+      contextWindow: 400_000,
+      maxTokens: 128_000,
+      input: ['text', 'image'],
+      reasoningEfforts
+    }
   }
   if (normalized.startsWith('gemini-3')) {
     return { id, contextWindow: 1_048_576, maxTokens: 65_536, input: ['text', 'image'] }
@@ -687,6 +736,13 @@ function resolveReasoningEfforts(value: Record<string, unknown>): false | Record
     return Object.keys(result).length > 0 ? result : undefined
   }
   return undefined
+}
+
+export function resolveRendCoreReasoningEfforts(
+  id: string,
+  value: Record<string, unknown> = {}
+): false | Record<string, string | null> | undefined {
+  return resolveReasoningEfforts(value) ?? knownRendCoreReasoningEfforts(id)
 }
 
 function latestHarnessAttemptLogs(logLines: readonly string[]): readonly string[] {
