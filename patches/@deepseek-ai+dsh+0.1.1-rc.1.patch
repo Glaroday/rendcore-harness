@@ -10,3 +10,63 @@ index 881bb2a..adc3a2a 100644
      "commander": "^15.0.0",
      "js-yaml": "^4.2.0",
      "node-addon-require-builtin": "^0.1.4",
+diff --git a/node_modules/@deepseek-ai/dsh/config/agent-presets/code/agent.cordis.yml b/node_modules/@deepseek-ai/dsh/config/agent-presets/code/agent.cordis.yml
+index eedabe4..a3d03e3 100644
+--- a/node_modules/@deepseek-ai/dsh/config/agent-presets/code/agent.cordis.yml
++++ b/node_modules/@deepseek-ai/dsh/config/agent-presets/code/agent.cordis.yml
+@@ -150,6 +150,15 @@
+   config:
+     - id: compaction-basic
+       name: '@deepseek-ai/dsh-compaction-basic'
++      config:
++        auto: true
++        thresholdRatio: 0.7
++        retainRatio: 0.12
++        summarizationProvider: rendcore
++        summarizationModel: gemini-pro-agent
++        maxTokens: 8192
++        compactionRetries: 2
++        maxOverflowRetries: 3
+ 
+     - id: command-compact
+       name: '@deepseek-ai/dsh-command-compact'
+diff --git a/node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/agent.cordis.yml b/node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/agent.cordis.yml
+index aef4a25..c64b11d 100644
+--- a/node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/agent.cordis.yml
++++ b/node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/agent.cordis.yml
+@@ -131,6 +131,15 @@
+   config:
+     - id: compaction-basic
+       name: '@deepseek-ai/dsh-compaction-basic'
++      config:
++        auto: true
++        thresholdRatio: 0.7
++        retainRatio: 0.12
++        summarizationProvider: rendcore
++        summarizationModel: gemini-pro-agent
++        maxTokens: 8192
++        compactionRetries: 2
++        maxOverflowRetries: 3
+ 
+     - id: command-compact
+       name: '@deepseek-ai/dsh-command-compact'
+diff --git a/node_modules/@deepseek-ai/dsh/config/agent-presets/standard/agent.cordis.yml b/node_modules/@deepseek-ai/dsh/config/agent-presets/standard/agent.cordis.yml
+index 3bccbc7..4474fc1 100644
+--- a/node_modules/@deepseek-ai/dsh/config/agent-presets/standard/agent.cordis.yml
++++ b/node_modules/@deepseek-ai/dsh/config/agent-presets/standard/agent.cordis.yml
+@@ -143,6 +143,15 @@
+   config:
+     - id: compaction-basic
+       name: '@deepseek-ai/dsh-compaction-basic'
++      config:
++        auto: true
++        thresholdRatio: 0.7
++        retainRatio: 0.12
++        summarizationProvider: rendcore
++        summarizationModel: gemini-pro-agent
++        maxTokens: 8192
++        compactionRetries: 2
++        maxOverflowRetries: 3
+ 
+     - id: command-compact
+       name: '@deepseek-ai/dsh-command-compact'

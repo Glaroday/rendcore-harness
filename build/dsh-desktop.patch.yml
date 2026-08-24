@@ -165,6 +165,21 @@
             maxTokens: 128000
             input: [text, image]
 
+# Keep automatic context compaction enabled for every agent preset. The
+# summarizer target is rewritten at startup to the largest currently available
+# RendCore model, so an oversized history is summarized by a model that can
+# actually accept it instead of the model that just overflowed.
+- id: compaction-basic
+  config:
+    auto: true
+    thresholdRatio: 0.7
+    retainRatio: 0.12
+    summarizationProvider: rendcore
+    summarizationModel: gemini-pro-agent
+    maxTokens: 8192
+    compactionRetries: 2
+    maxOverflowRetries: 3
+
 # Built-in compatibility for muse-spark streams that close without a terminal
 # finish event after already delivering content.
 - insert:

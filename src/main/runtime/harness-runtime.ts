@@ -130,6 +130,29 @@ export function replaceRendCoreModelBlock(source: string, modelBlock: string): s
   )
 }
 
+/** Pick the largest online chat model for compaction summaries. */
+export function selectRendCoreCompactionModel(
+  models: readonly OnlineModelEntry[]
+): string {
+  return [...models]
+    .filter((model) => !isImageGenerationOnlyModel(model.id))
+    .sort((left, right) => {
+      const contextDelta = (right.contextWindow ?? 0) - (left.contextWindow ?? 0)
+      if (contextDelta !== 0) return contextDelta
+      const outputDelta = (right.maxTokens ?? 0) - (left.maxTokens ?? 0)
+      if (outputDelta !== 0) return outputDelta
+      return left.id.localeCompare(right.id)
+    })[0]?.id ?? RENDCORE_SAFE_DEFAULT_MODEL
+}
+
+/** Replace the startup compaction target without touching the model catalog. */
+export function replaceRendCoreCompactionModel(source: string, model: string): string {
+  const marker = /(summarizationProvider:\s*rendcore\r?\n\s+summarizationModel:\s*)[^\r\n]+/
+  if (!marker.test(source)) throw new Error('RendCore compaction configuration was not found')
+  const normalized = model.replace(/[\r\n]/g, '')
+  return source.replace(marker, `$1${normalized}`)
+}
+
 export class HarnessRuntime {
   private child?: HarnessChildProcess
   private logStream?: WriteStream
@@ -561,7 +584,10 @@ async function createOnlineRendCorePatch(
 
     const source = await readFile(basePatchPath, 'utf8')
     const modelBlock = renderRendCoreModelBlock(models)
-    const dynamicPatch = replaceRendCoreModelBlock(source, modelBlock)
+    const dynamicPatch = replaceRendCoreCompactionModel(
+      replaceRendCoreModelBlock(source, modelBlock),
+      selectRendCoreCompactionModel(models)
+    )
     const dynamicPath = join(dshHome, 'rendcore-online.patch.yml')
     await writeFile(dynamicPath, dynamicPatch, 'utf8')
     return { path: dynamicPath, modelCount: models.length, models }
@@ -577,7 +603,10 @@ async function createCapabilityRendCorePatch(
 ): Promise<OnlinePatchResult> {
   const source = await readFile(basePatchPath, 'utf8')
   const models = capabilities.filter((model) => !isImageGenerationOnlyModel(model.id))
-  const dynamicPatch = replaceRendCoreModelBlock(source, renderRendCoreModelBlock(models))
+  const dynamicPatch = replaceRendCoreCompactionModel(
+    replaceRendCoreModelBlock(source, renderRendCoreModelBlock(models)),
+    selectRendCoreCompactionModel(models)
+  )
   const dynamicPath = join(dshHome, 'rendcore-online.patch.yml')
   await writeFile(dynamicPath, dynamicPatch, 'utf8')
   return { path: dynamicPath, modelCount: models.length, models: [...models] }
@@ -645,7 +674,10 @@ async function createCachedRendCorePatch(
     materializeRendCoreModel(id, undefined, capabilityById.get(id.toLowerCase()))
   )
   const modelBlock = renderRendCoreModelBlock(models)
-  const dynamicPatch = replaceRendCoreModelBlock(baseSource, modelBlock)
+  const dynamicPatch = replaceRendCoreCompactionModel(
+    replaceRendCoreModelBlock(baseSource, modelBlock),
+    selectRendCoreCompactionModel(models)
+  )
   await writeFile(cachedPath, dynamicPatch, 'utf8')
   return { path: cachedPath, modelCount: models.length, models }
 }

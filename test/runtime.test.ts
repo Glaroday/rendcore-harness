@@ -16,6 +16,8 @@ import {
   parseRendCoreModelCapabilities,
   reasoningEffortsFromThinking,
   replaceRendCoreModelBlock,
+  replaceRendCoreCompactionModel,
+  selectRendCoreCompactionModel,
   resolveRendCoreReasoningEfforts,
   updateReadyStability
 } from '../src/main/runtime/harness-runtime'
@@ -28,6 +30,32 @@ import {
 } from '../src/main/window-navigation'
 
 describe('Harness launch contract', () => {
+  it('routes compaction summaries through the largest available online model', () => {
+    expect(
+      selectRendCoreCompactionModel([
+        { id: 'small', contextWindow: 200_000 },
+        { id: 'gemini-pro-agent', contextWindow: 2_000_000 },
+        { id: 'gpt-image-2', contextWindow: 8_000_000 }
+      ])
+    ).toBe('gemini-pro-agent')
+  })
+
+  it('rewrites only the RendCore compaction target in CRLF patches', () => {
+    const source = [
+      '- id: compaction-basic',
+      '  config:',
+      '    summarizationProvider: rendcore',
+      '    summarizationModel: old-model',
+      '',
+      '- id: unrelated'
+    ].join('\r\n')
+
+    const updated = replaceRendCoreCompactionModel(source, 'gemini-pro-agent')
+    expect(updated).toContain('summarizationProvider: rendcore\r\n    summarizationModel: gemini-pro-agent')
+    expect(updated).toContain('- id: unrelated')
+    expect(updated).not.toContain('old-model')
+  })
+
   it('replaces the RendCore model catalog in Windows CRLF patches', () => {
     const source = [
       '- id: llm-pi-ai',
