@@ -137,6 +137,10 @@
         "to": "plugin-recovery.html"
       },
       {
+        "from": "build/windows-menu.html",
+        "to": "windows-menu.html"
+      },
+      {
         "from": "node_modules/node/bin/node.exe",
         "to": "node-runtime/node.exe"
       }
