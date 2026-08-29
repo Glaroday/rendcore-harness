@@ -17,6 +17,32 @@ diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.co
  
      - id: command-compact
        name: '@deepseek-ai/dsh-command-compact'
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/lib/index.js b/node_modules/@deepseek-ai/dsh-agent-presets/lib/index.js
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/lib/index.js
+@@ -1317,7 +1317,8 @@ let AgentPresets = (() => {
+ 		* @throws when no configured root supplies that id.
+ 		*/
+ 		async resolve(id) {
+-			const wanted = id ?? this.defaultId;
++			const requested = id ?? this.defaultId;
++			const wanted = requested === "code" ? "ptc" : requested;
+ 			const presets = await this.list();
+ 			const found = presets.find((preset) => preset.id === wanted);
+ 			if (found === void 0) throw new UnknownPresetError(wanted, presets.map((preset) => preset.id));
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/lib/invariant.js b/node_modules/@deepseek-ai/dsh-agent-presets/lib/invariant.js
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/lib/invariant.js
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/lib/invariant.js
+@@ -1294,7 +1294,8 @@ let AgentPresets = (() => {
+ 		* @throws when no configured root supplies that id.
+ 		*/
+ 		async resolve(id) {
+-			const wanted = id ?? this.defaultId;
++			const requested = id ?? this.defaultId;
++			const wanted = requested === "code" ? "ptc" : requested;
+ 			const presets = await this.list();
+ 			const found = presets.find((preset) => preset.id === wanted);
+ 			if (found === void 0) throw new UnknownPresetError(wanted, presets.map((preset) => preset.id));
 diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml b/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml
 --- a/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml
 +++ b/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml

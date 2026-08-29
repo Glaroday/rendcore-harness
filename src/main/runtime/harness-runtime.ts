@@ -5,6 +5,7 @@ import { mkdir } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { dirname, join } from 'node:path'
 import type { RuntimePhase, RuntimeSnapshot } from '../../shared/contracts'
+import { migrateLegacyPresetSetting } from '../state/preset-migration'
 import { prepareRendCoreModelCatalog } from './rendcore-model-catalog'
 
 export interface HarnessRuntimeOptions {
@@ -346,6 +347,8 @@ export class HarnessRuntime {
     await mkdir(this.options.dshHome, { recursive: true })
     await mkdir(dirname(this.options.logPath), { recursive: true })
     this.logStream ??= createWriteStream(this.options.logPath, { flags: 'a' })
+
+    await migrateLegacyPresetSetting(this.options.dshHome, (line) => this.writeLog(line))
 
     const catalog = await prepareRendCoreModelCatalog(
       this.options.dshPatchPath,
