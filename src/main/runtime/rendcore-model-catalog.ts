@@ -12,7 +12,7 @@ export interface RendCoreModel {
   name: string
   contextWindow?: number
   maxTokens?: number
-  input: Array<'text' | 'image' | 'video'>
+  input: Array<'text' | 'image'>
   reasoningEfforts?: false | Record<string, string | null>
 }
 
@@ -28,6 +28,7 @@ export async function prepareRendCoreModelCatalog(
   log: (line: string) => void
 ): Promise<CatalogResult> {
   const cachedPath = join(dshHome, 'rendcore-online.patch.yml')
+  await sanitizeStoredModels(dshHome, log)
   const capabilities = await fetchJson(RENDCORE_MODEL_CAPABILITIES_ENDPOINT, undefined, 8_000)
     .then(parseCapabilities)
     .catch((error: unknown) => {
@@ -70,12 +71,14 @@ export async function prepareRendCoreModelCatalog(
   if (existsSync(cachedPath)) {
     try {
       const cached = await readFile(cachedPath, 'utf8')
-      const ids = [...cached.matchAll(/^\s+- id:\s*(.+?)\s*$/gm)]
-        .map((match) => decodeYamlString(match[1] ?? ''))
-        .filter(Boolean)
-      if (ids.length > 0) {
-        log(`[desktop] using cached RendCore model catalog (${ids.length} models)`)
-        return { path: cachedPath, models: ids.map(fallbackModel), source: 'cache' }
+      const cachedModels = modelsFromPatch(parse(cached))
+      if (cachedModels.length > 0) {
+        const base = await readFile(basePatchPath, 'utf8')
+        await writeFile(cachedPath, replaceCatalog(base, cachedModels), 'utf8')
+        await syncStoredModels(dshHome, cachedModels)
+        await repairDefaultModel(dshHome, new Set(cachedModels.map((model) => model.id)))
+        log(`[desktop] using sanitized cached RendCore model catalog (${cachedModels.length} models)`)
+        return { path: cachedPath, models: cachedModels, source: 'cache' }
       }
     } catch (error) {
       log(`[desktop] cached RendCore catalog is invalid: ${message(error)}`)
@@ -110,6 +113,18 @@ export function parseCapabilities(payload: unknown): RendCoreModel[] {
       reasoningEfforts: parseReasoning(value.thinking ?? value.reasoning_efforts ?? value.reasoningEfforts)
     }]
   }))
+}
+
+function modelsFromPatch(payload: unknown): RendCoreModel[] {
+  if (!Array.isArray(payload)) return []
+  for (const row of payload) {
+    const entry = objectValue(row)
+    if (entry?.id !== 'llm-pi-ai') continue
+    const providers = objectValue(objectValue(entry.config)?.providers)
+    const rendcore = objectValue(providers?.rendcore)
+    return normalizeStoredModelList(rendcore?.models)
+  }
+  return []
 }
 
 function parseModelIds(payload: unknown): string[] {
@@ -187,6 +202,41 @@ async function syncStoredModels(dshHome: string, models: RendCoreModel[]): Promi
   await writeFile(settingsPath, stringify(settings), 'utf8')
 }
 
+async function sanitizeStoredModels(dshHome: string, log: (line: string) => void): Promise<void> {
+  const settingsPath = join(dshHome, 'settings.yaml')
+  if (!existsSync(settingsPath)) return
+  try {
+    const source = await readFile(settingsPath, 'utf8')
+    const settings = parse(source) as Record<string, unknown> | null
+    const providers = objectValue(objectValue(settings?.['llm-pi-ai'])?.providers)
+    const rendcore = objectValue(providers?.rendcore)
+    if (!rendcore || !Array.isArray(rendcore.models)) return
+    const models = normalizeStoredModelList(rendcore.models)
+    if (models.length === 0) return
+    rendcore.models = models
+    await writeFile(settingsPath, stringify(settings), 'utf8')
+  } catch (error) {
+    log(`[desktop] could not sanitize stored RendCore models: ${message(error)}`)
+  }
+}
+
+function normalizeStoredModelList(value: unknown): RendCoreModel[] {
+  if (!Array.isArray(value)) return []
+  return unique(value.flatMap((entry) => {
+    const model = objectValue(entry)
+    const id = stringValue(model?.id)
+    if (!model || !id || isImageGenerationOnly(id, model)) return []
+    return [{
+      id,
+      name: stringValue(model.name) || id,
+      contextWindow: positiveInteger(model.contextWindow ?? model.context_window ?? model.context),
+      maxTokens: positiveInteger(model.maxTokens ?? model.max_tokens ?? model.max_output),
+      input: normalizeInput(arrayOfStrings(model.input), model, id),
+      reasoningEfforts: parseReasoning(model.reasoningEfforts ?? model.reasoning_efforts ?? model.thinking)
+    }]
+  }))
+}
+
 async function repairDefaultModel(dshHome: string, available: Set<string>): Promise<void> {
   const settingsPath = join(dshHome, 'settings.yaml')
   if (!existsSync(settingsPath)) return
@@ -223,19 +273,47 @@ async function fetchJson(url: string, headers: Record<string, string> | undefine
 
 function parseReasoning(value: unknown): false | Record<string, string | null> | undefined {
   if (value === false) return false
-  if (Array.isArray(value)) {
-    const efforts = Object.fromEntries(value.filter((item): item is string => typeof item === 'string').map((item) => [item, item]))
-    return Object.keys(efforts).length > 0 ? efforts : undefined
+  const allowed = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+  const normalizeKey = (raw: string): string => {
+    const key = raw.trim().toLowerCase()
+    return ['none', 'disabled', 'false'].includes(key) ? 'off' : key
+  }
+  const efforts: Record<string, string | null> = {}
+  if (typeof value === 'string' || Array.isArray(value)) {
+    for (const item of typeof value === 'string' ? [value] : value) {
+      if (typeof item !== 'string') continue
+      const key = normalizeKey(item)
+      if (!allowed.has(key)) continue
+      efforts[key] = item.trim()
+    }
   }
   if (value && typeof value === 'object') {
-    const efforts = Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => typeof item === 'string' || item === null)) as Record<string, string | null>
-    return Object.keys(efforts).length > 0 ? efforts : undefined
+    for (const [rawKey, rawWireValue] of Object.entries(value as Record<string, unknown>)) {
+      const key = normalizeKey(rawKey)
+      if (!allowed.has(key)) continue
+      const wireValue = typeof rawWireValue === 'string' && rawWireValue.trim()
+        ? rawWireValue.trim()
+        : key === 'off' && (rawWireValue === null || rawWireValue === false || rawWireValue === '')
+          ? null
+          : undefined
+      if (wireValue === undefined) continue
+      // Prefer a canonical key if the endpoint supplies both `off` and an
+      // alias such as `none`.
+      if (!(key in efforts) || rawKey.trim().toLowerCase() === key) efforts[key] = wireValue
+    }
   }
-  return undefined
+  const levels = Object.keys(efforts)
+  if (levels.length === 0) return undefined
+  // PiAi treats a catalog with only `off` as semantically invalid. The
+  // capability service uses `none` for models that do not expose reasoning.
+  return levels.some((level) => level !== 'off') ? efforts : false
 }
 
 function normalizeInput(values: string[], model: Record<string, unknown>, id: string): RendCoreModel['input'] {
-  const normalized = values.map((value) => value.toLowerCase()).filter((value): value is 'text' | 'image' | 'video' => ['text', 'image', 'video'].includes(value))
+  // Harness 0.1.2's pi-ai adapter currently validates only text and image.
+  // Do not let a future capability response containing video make the entire
+  // provider fail to boot; video can be exposed when the adapter supports it.
+  const normalized = values.map((value) => value.toLowerCase()).filter((value): value is 'text' | 'image' => ['text', 'image'].includes(value))
   if (normalized.length > 0) return normalized.includes('text') ? [...new Set(normalized)] : ['text', ...new Set(normalized)]
   if (model.supports_vision === true || model.supportsVision === true) return ['text', 'image']
   return fallbackModel(id).input
@@ -254,5 +332,4 @@ function positiveInteger(value: unknown): number | undefined { return typeof val
 function stringValue(value: unknown): string { return typeof value === 'string' ? value.trim() : '' }
 function arrayOfStrings(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [] }
 function objectValue(value: unknown): Record<string, any> | undefined { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : undefined }
-function decodeYamlString(value: string): string { try { const parsed = parse(value) as unknown; return typeof parsed === 'string' ? parsed.trim() : '' } catch { return value.trim().replace(/^['"]|['"]$/g, '') } }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }

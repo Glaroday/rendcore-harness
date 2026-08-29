@@ -1,6 +1,6 @@
 {
   "name": "rendcore-harness",
-  "version": "0.1.19",
+  "version": "0.1.21",
   "description": "A cross-platform desktop shell for RendCore Harness.",
   "private": true,
   "type": "module",
