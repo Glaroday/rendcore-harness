@@ -78,6 +78,7 @@ import {
   rollBackMigration
 } from './state/generation-migration'
 import { cleanupPluginOwnedComponents } from './state/plugin-component-cleanup'
+import { clearLegacyModuleFallbackConflicts } from './state/module-fallback-migration'
 import {
   appBundlePathFromExecutable,
   auditLaunchAgents,
@@ -1037,6 +1038,14 @@ function launchHarness(): Promise<void> {
     // Restore its snapshot before projection or package repair can observe the
     // partially switched profile.
     await recoverInterruptedMigration(dshHome, (line) => runtime.note(line))
+    // Harness 0.1.2 owns profiles/node_modules as its installation fallback.
+    // Older RendCore builds copied a few bundled plugins there as real
+    // directories, which the new fallback correctly refuses to overwrite.
+    await clearLegacyModuleFallbackConflicts({
+      dshHome,
+      installationNodeModules: join(app.getAppPath(), 'node_modules'),
+      note: (line) => runtime.note(line)
+    })
     // Cold start, Harness stopped: sweep unreferenced plugin generations and
     // reproject so the profile's links match `desired`. A no-op on a profile
     // that has never used a generation.
