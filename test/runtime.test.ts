@@ -1,188 +1,32 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   buildHarnessArguments,
   buildHarnessSpawnOptions,
   buildNodeArguments,
+  extractDshEntryFailureCause,
   extractDuplicateLoaderEntryId,
   extractFailureCause,
   extractOffendingPlugin,
   extractOffendingPlugins,
   extractPluginFailureReferences,
-  extractRendCoreModelBlock,
   extractSlotConflictName,
   formatExitCode,
-  knownRendCoreReasoningEfforts,
-  materializeRendCoreModel,
-  parseRendCoreModelCapabilities,
-  reasoningEffortsFromThinking,
-  replaceRendCoreModelBlock,
-  replaceRendCoreCompactionModel,
-  selectRendCoreCompactionModel,
-  resolveRendCoreReasoningEfforts,
+  isHarnessStartupProbeHealthy,
+  resolveShellEnvironment,
   updateReadyStability
 } from '../src/main/runtime/harness-runtime'
 import { canGrantWindowPermission, isTrustedAppUrl } from '../src/main/security-policy'
 import { buildDisclaimedUtilityProcessSpec } from '../src/main/runtime/disclaimed-utility-process'
 import {
+  clearStaleHarnessAuthCookies,
   desktopHarnessUrl,
   isAbortedNavigationError,
   shouldLoadHarnessUrl
 } from '../src/main/window-navigation'
 
 describe('Harness launch contract', () => {
-  it('routes compaction summaries through the largest available online model', () => {
-    expect(
-      selectRendCoreCompactionModel([
-        { id: 'small', contextWindow: 200_000 },
-        { id: 'gemini-pro-agent', contextWindow: 2_000_000 },
-        { id: 'gpt-image-2', contextWindow: 8_000_000 }
-      ])
-    ).toBe('gemini-pro-agent')
-  })
-
-  it('rewrites only the RendCore compaction target in CRLF patches', () => {
-    const source = [
-      '- id: compaction-basic',
-      '  config:',
-      '    summarizationProvider: rendcore',
-      '    summarizationModel: old-model',
-      '',
-      '- id: unrelated'
-    ].join('\r\n')
-
-    const updated = replaceRendCoreCompactionModel(source, 'gemini-pro-agent')
-    expect(updated).toContain('summarizationProvider: rendcore\r\n    summarizationModel: gemini-pro-agent')
-    expect(updated).toContain('- id: unrelated')
-    expect(updated).not.toContain('old-model')
-  })
-
-  it('replaces the RendCore model catalog in Windows CRLF patches', () => {
-    const source = [
-      '- id: llm-pi-ai',
-      '  config:',
-      '    providers:',
-      '      rendcore:',
-      '        models:',
-      '          - id: old-model',
-      '',
-      '# Keep this plugin section after the model catalog.',
-      '- insert:',
-      '    - id: model-fix',
-      '',
-      '- id: agent-default-model',
-      '  config:',
-      '    provider: rendcore'
-    ].join('\r\n')
-    const updated = replaceRendCoreModelBlock(
-      source,
-      '          - id: new-model\n            name: new-model'
-    )
-
-    expect(updated).not.toContain('old-model')
-    expect(updated).toContain('          - id: new-model\r\n            name: new-model')
-    expect(updated).toContain('# Keep this plugin section after the model catalog.\r\n- insert:')
-    expect(updated).toContain('    - id: model-fix')
-    expect(extractRendCoreModelBlock(updated)).toContain('new-model')
-  })
-
-  it('declares selectable reasoning levels for known RendCore GPT models', () => {
-    expect(knownRendCoreReasoningEfforts('gpt-5.6-sol')).toEqual({
-      low: 'low',
-      medium: 'medium',
-      high: 'high',
-      xhigh: 'xhigh',
-      max: 'max'
-    })
-    expect(knownRendCoreReasoningEfforts('gpt-5.4-mini')).toEqual({
-      low: 'low',
-      medium: 'medium',
-      high: 'high'
-    })
-    expect(knownRendCoreReasoningEfforts('gpt-oss-120b-medium')).toBeUndefined()
-  })
-
-  it('lets endpoint reasoning metadata override the known-model fallback', () => {
-    expect(
-      resolveRendCoreReasoningEfforts('gpt-5.6-sol', { supports_reasoning: false })
-    ).toBe(false)
-    expect(
-      resolveRendCoreReasoningEfforts('custom-model', {
-        reasoning_efforts: { low: 'budget-low', high: 'budget-high' }
-      })
-    ).toEqual({ low: 'budget-low', high: 'budget-high' })
-  })
-
-  it('parses context, output and thinking levels from the RendCore capability API', () => {
-    const models = parseRendCoreModelCapabilities({
-      models: [
-        {
-          configured: true,
-          context: 200_000,
-          display_name: 'GPT-5.6 Sol',
-          id: 'gpt-5.6-sol',
-          max_output: 64_000,
-          thinking: ['low', 'high', 'max']
-        },
-        {
-          configured: false,
-          context: 1_000_000,
-          id: 'offline-model',
-          max_output: 64_000,
-          thinking: ['high']
-        },
-        {
-          configured: true,
-          context: 32_768,
-          id: 'gpt-image-2',
-          max_output: 4_096,
-          thinking: ['none']
-        }
-      ]
-    })
-
-    expect(models).toEqual([
-      {
-        id: 'gpt-5.6-sol',
-        name: 'GPT-5.6 Sol',
-        contextWindow: 200_000,
-        maxTokens: 64_000,
-        input: ['text', 'image'],
-        reasoningEfforts: { low: 'low', high: 'high', max: 'max' }
-      }
-    ])
-  })
-
-  it('uses capability API values ahead of /v1/models and built-in guesses', () => {
-    const capability = parseRendCoreModelCapabilities({
-      models: [{
-        configured: true,
-        context: 200_000,
-        display_name: 'GPT-5.6 Sol',
-        id: 'gpt-5.6-sol',
-        max_output: 64_000,
-        thinking: ['low', 'high', 'max']
-      }]
-    })[0]
-
-    expect(
-      materializeRendCoreModel(
-        'gpt-5.6-sol',
-        { context_window: 999_999, max_output_tokens: 99_999 },
-        capability
-      )
-    ).toMatchObject({
-      name: 'GPT-5.6 Sol',
-      contextWindow: 200_000,
-      maxTokens: 64_000,
-      reasoningEfforts: { low: 'low', high: 'high', max: 'max' }
-    })
-  })
-
-  it('maps the capability API none level to an off choice only when reasoning exists', () => {
-    expect(reasoningEffortsFromThinking(['low', 'none'])).toEqual({ low: 'low', off: 'none' })
-    expect(reasoningEffortsFromThinking(['none'])).toBe(false)
-  })
-
   it('does not treat a briefly reachable port as a completed Harness startup', () => {
     const firstProbe = updateReadyStability(undefined, true, 1_000)
     expect(firstProbe).toEqual({ readySince: 1_000, ready: false })
@@ -193,6 +37,15 @@ describe('Harness launch contract', () => {
     const restartedProbe = updateReadyStability(interruptedProbe.readySince, true, 2_000)
     expect(updateReadyStability(restartedProbe.readySince, true, 2_499).ready).toBe(false)
     expect(updateReadyStability(restartedProbe.readySince, true, 2_500).ready).toBe(true)
+  })
+
+  it('does not declare an authenticated Harness ready before its launch token arrives', () => {
+    // Harness 0.1.2 returns 401 to this deliberately unauthenticated probe.
+    // The response proves the port is live, but the renderer must not navigate
+    // until stdout has supplied the token it exchanges for a session cookie.
+    expect(isHarnessStartupProbeHealthy(401, undefined)).toBe(false)
+    expect(isHarnessStartupProbeHealthy(401, 'launch-token')).toBe(true)
+    expect(isHarnessStartupProbeHealthy(500, 'launch-token')).toBe(false)
   })
 
   it('binds the web server to a random loopback port', () => {
@@ -223,6 +76,22 @@ describe('Harness launch contract', () => {
     ])
   })
 
+  it('boots an isolated profile while preserving the web server arguments', () => {
+    expect(
+      buildHarnessArguments(43127, 'C:\\app\\dsh-desktop.patch.yml', 'desktop-safe-mode')
+    ).toEqual([
+      '--profile',
+      'desktop-safe-mode',
+      '--patch',
+      'C:\\app\\dsh-desktop.patch.yml',
+      '--no-open',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '43127'
+    ])
+  })
+
   it('launches Harness with the bundled Node.js runtime', () => {
     const options = buildHarnessSpawnOptions(
       'C:\\Users\\tester\\AppData\\Roaming\\dsh-desktop\\launch-root',
@@ -239,29 +108,29 @@ describe('Harness launch contract', () => {
       cwd: 'C:\\Users\\tester\\AppData\\Roaming\\dsh-desktop\\launch-root',
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      // Detaching the Harness on Windows gives it its own console and process
+      // group, so a buggy child calling `os.kill(pid, 0)` cannot broadcast a
+      // Ctrl+C back to the desktop main process (issue #208).
+      detached: true,
       env: {
         DSH_HOME: 'C:\\Users\\tester\\AppData\\Roaming\\dsh-desktop\\harness',
         NO_COLOR: '1',
-        PNPM_MAX_WORKERS: '1',
-        npm_config_child_concurrency: '1',
-        npm_config_package_import_method: 'clone-or-copy',
-        npm_config_side_effects_cache: 'false',
-        PNPM_CONFIG_CHILD_CONCURRENCY: '1',
         Path: 'windows-path'
       }
     })
     expect(options.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE')
   })
 
-  it('keeps the RendCore credential file-backed and writable', () => {
-    const options = buildHarnessSpawnOptions(
-      'C:\\Users\\tester\\AppData\\Roaming\\rendcore-harness\\launch-root',
-      'C:\\Users\\tester\\AppData\\Roaming\\rendcore-harness\\harness',
-      'win32',
-      { Path: 'windows-path', RENDCORE_API_KEY: 'inherited-secret' }
-    )
-
-    expect(options.env).not.toHaveProperty('RENDCORE_API_KEY')
+  it('does not detach the Harness on macOS or Linux', () => {
+    // `detached: true` is a Windows-only escape hatch. The macOS path uses
+    // Electron's UtilityProcess fork, and Linux spawns are unaffected by
+    // the Windows console-broadcast problem the flag works around.
+    for (const platform of ['darwin', 'linux'] as const) {
+      const options = buildHarnessSpawnOptions('/launch-root', '/harness', platform, {
+        PATH: '/usr/bin'
+      })
+      expect(options.detached).toBeFalsy()
+    }
   })
 
   it('passes the internal-loader flag directly to bundled Node.js', () => {
@@ -320,17 +189,12 @@ describe('Harness launch contract', () => {
           PATH: '/usr/bin',
           DSH_HOME: '/Users/tester/Library/Application Support/dsh-desktop/harness',
           NO_COLOR: '1',
-          PNPM_MAX_WORKERS: '1',
-          npm_config_child_concurrency: '1',
-          npm_config_package_import_method: 'clone-or-copy',
           npm_config_side_effects_cache: 'false',
-          PNPM_CONFIG_CHILD_CONCURRENCY: '1',
-          PNPM_CONFIG_PACKAGE_IMPORT_METHOD: 'clone-or-copy',
           PNPM_CONFIG_SIDE_EFFECTS_CACHE: 'false'
         },
         execArgv: ['--expose-internals'],
         stdio: 'pipe',
-        serviceName: 'RendCore Harness',
+        serviceName: 'DSH Harness',
         disclaim: true
       }
     })
@@ -339,6 +203,25 @@ describe('Harness launch contract', () => {
       buildDisclaimedUtilityProcessSpec(nodeArguments, spawnOptions, { disclaim: false }).options
         .disclaim
     ).toBe(false)
+  })
+
+  it('declares Node mode for Harness children without imposing it on the utility process', async () => {
+    // dsh-market re-runs the dsh CLI as `execPath [...execArgv] bin.js plugin
+    // --profile web add …`. On macOS execPath is the Electron helper, so
+    // without Node mode that child boots as an Electron app, the leading
+    // `--expose-internals` shifts argv, and the CLI answers "--profile <name>
+    // is required" instead of installing. The flag cannot travel in the
+    // process environment: the utility process is launched with Chromium
+    // switches Node rejects, so the entry sets it from the inside instead.
+    const macOptions = buildHarnessSpawnOptions('/launch-root', '/harness', 'darwin', {
+      PATH: '/usr/bin',
+      ELECTRON_RUN_AS_NODE: '1'
+    })
+    expect(macOptions.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE')
+
+    const entry = await readFile(join(process.cwd(), 'build', 'harness-node-entry.mjs'), 'utf8')
+    expect(entry).toContain('process.versions.electron !== undefined')
+    expect(entry).toContain("process.env.ELECTRON_RUN_AS_NODE = '1'")
   })
 
   it('rejects an unexpected macOS Harness argument layout', () => {
@@ -358,7 +241,35 @@ describe('Harness launch contract', () => {
   })
 })
 
+describe('shell environment resolution', () => {
+  it(
+    'resolves a non-empty environment from the user login shell',
+    () => {
+      const env = resolveShellEnvironment()
+      expect(env).toBeDefined()
+      // Windows may preserve the conventional mixed-case key.
+      expect(env.PATH ?? env.Path).toBeTruthy()
+    },
+    20_000
+  )
 
+  it('memoises the result across calls', () => {
+    const first = resolveShellEnvironment()
+    const second = resolveShellEnvironment()
+    // Same object reference — the result is cached for the process lifetime.
+    expect(second).toBe(first)
+  })
+
+  it('produces a PATH that includes platform-standard system directories', () => {
+    const env = resolveShellEnvironment()
+    const path = env.PATH ?? env.Path ?? ''
+    if (process.platform === 'win32') {
+      expect(path).toMatch(/[A-Za-z]:\\/)
+    } else {
+      expect(path).toContain('/usr/bin')
+    }
+  })
+})
 
 describe('harness failure cause extraction', () => {
   it('extracts the DSH entry failure message from stderr', () => {
@@ -367,6 +278,7 @@ describe('harness failure cause extraction', () => {
       '[stderr] AggregateError: loader entries failed to apply',
     ]
     expect(extractFailureCause(logs)).toBe('Error: dsh: plugin tree failed to load')
+    expect(extractDshEntryFailureCause(logs)).toBe('Error: dsh: plugin tree failed to load')
   })
 
   it('extracts uncaught exception messages from stderr', () => {
@@ -429,6 +341,7 @@ describe('harness failure cause extraction', () => {
       '[stderr] [harness-node] DSH entry failed: Error: second plugin failed'
     ]
     expect(extractFailureCause(logs)).toBe('Error: second plugin failed')
+    expect(extractDshEntryFailureCause(logs)).toBe('Error: second plugin failed')
   })
 
   it('ignores long error lines (>200 chars) when falling back', () => {
@@ -455,6 +368,14 @@ describe('offending plugin extraction', () => {
       '[stderr] [harness-node] DSH entry failed: Error: dsh: plugin tree failed to load: failed to apply loader entry abc (@linxin666/dsh-web-ui-all): error message'
     ]
     expect(extractOffendingPlugin(logs)).toBe('@linxin666/dsh-web-ui-all')
+  })
+
+  it('extracts the third-party plugin nested under the internal include entry', () => {
+    const logs = [
+      '[stderr] [harness-node] DSH entry failed: Error: dsh: plugin tree failed to load: failed to apply loader entry include (cordis:include): failed to apply loader entry db-connector (dsh-db-connector): cannot get property "commands" without inject'
+    ]
+    expect(extractPluginFailureReferences(logs)).toEqual(['dsh-db-connector'])
+    expect(extractOffendingPlugins(logs)).toEqual(['dsh-db-connector'])
   })
 
   it('extracts plugin name from cannot resolve profile bundle error', () => {
@@ -596,6 +517,42 @@ describe('navigation trust boundary', () => {
 })
 
 describe('Harness window activation', () => {
+  it('removes accumulated authority cookies before exchanging a new launch token', async () => {
+    const removed: Array<[string, string]> = []
+    const cookies = {
+      get: async () => [
+        { name: 'dsh-auth-old-port' },
+        { name: 'unrelated-cookie' },
+        { name: 'dsh-auth-current-port' }
+      ],
+      remove: async (url: string, name: string) => {
+        removed.push([url, name])
+      }
+    }
+
+    expect(
+      await clearStaleHarnessAuthCookies(
+        cookies,
+        'http://127.0.0.1:43127/?token=next',
+        'next'
+      )
+    ).toBe(2)
+    expect(removed).toEqual([
+      ['http://127.0.0.1:43127/', 'dsh-auth-old-port'],
+      ['http://127.0.0.1:43127/', 'dsh-auth-current-port']
+    ])
+  })
+
+  it('does not clear cookies for a non-Harness destination or without a launch token', async () => {
+    const cookies = {
+      get: async () => [{ name: 'dsh-auth-old-port' }],
+      remove: async () => undefined
+    }
+
+    expect(await clearStaleHarnessAuthCookies(cookies, 'https://example.com', 'next')).toBe(0)
+    expect(await clearStaleHarnessAuthCookies(cookies, 'http://127.0.0.1:43127')).toBe(0)
+  })
+
   it('stamps Windows renderer URLs so plugins can avoid the native titlebar overlay', () => {
     expect(desktopHarnessUrl('http://127.0.0.1:43127', 'win32')).toBe(
       'http://127.0.0.1:43127/?dsh-desktop-mode=advanced&dsh-desktop-platform=win32'

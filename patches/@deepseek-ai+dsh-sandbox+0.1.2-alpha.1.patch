@@ -1,0 +1,14 @@
+diff --git a/node_modules/@deepseek-ai/dsh-sandbox/lib/index.js b/node_modules/@deepseek-ai/dsh-sandbox/lib/index.js
+--- a/node_modules/@deepseek-ai/dsh-sandbox/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-sandbox/lib/index.js
+@@ -91,6 +91,10 @@ function escalationHintMarker(subject) {
+ */
+ async function approveEscalation(request, approval) {
+ 	const { requestedMode: mode, effectiveMode, justification, subject } = request;
++	// Models occasionally repeat the already-effective full-access mode. There
++	// is no privilege boundary left to cross, so treat it as a no-op instead of
++	// trapping the agent in an identical-call retry loop.
++	if (effectiveMode === "danger-full-access" && mode === effectiveMode) return effectiveMode;
+ 	if (!(WIDER_MODES[effectiveMode] ?? []).includes(mode)) throw new Error(`sandbox escalation to "${mode}" is not strictly wider than this call's current "${effectiveMode}" mode`);
+ 	if (approval.approver === void 0) throw new Error(`sandbox escalation to "${mode}" requires approval, but no approval service is composed`);
+ 	if (approval.agent === void 0) throw new Error(`sandbox escalation to "${mode}" requires approval, but the call has no agent to route it through`);

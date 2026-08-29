@@ -1,50 +1,64 @@
-import { isMap, isSeq, parseDocument } from 'yaml'
+import { isMap, isSeq, parse, parseDocument } from 'yaml'
 
-/** Remove only patch-layer rows that target an uninstalled plugin. */
+/**
+ * The profile's user patch layer, and what uninstalling a plugin has to do to
+ * it.
+ *
+ * Removing a plugin takes its dependency, its bundle row and its files. What
+ * it has never taken is the rows the user layer aims at that plugin — an
+ * id-targeted config override, or an `insert` naming the package. Those rows
+ * survive the uninstall and go on pointing at something that no longer
+ * composes. Nothing rejects them: a row aimed at a missing id is inert, and a
+ * config value routing a service at a backend the plugin used to provide just
+ * leaves that service waiting, so the profile reads as a slow start rather
+ * than a broken one.
+ *
+ * The layer is user-authored, comments included, so it is edited as a document
+ * rather than reparsed and rewritten — and only the rows that name the plugin
+ * are touched. Wiping the layer would take the user's own overrides with it.
+ */
+
+/** Loader entry ids a bundle declares in its own patch — what its rows target. */
+export function bundleEntryIds(patchText: string): string[] {
+  let value: unknown
+  try {
+    value = parse(patchText)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(value)) return []
+
+  const ids: string[] = []
+  for (const row of value) {
+    const insert = (row as { insert?: unknown } | null)?.insert
+    if (!Array.isArray(insert)) continue
+    for (const entry of insert) {
+      const id = (entry as { id?: unknown } | null)?.id
+      if (typeof id === 'string') ids.push(id)
+    }
+  }
+  return ids
+}
+
 export interface PatchLayerPrune {
   text: string
   removed: string[]
 }
 
-/** Loader entry ids declared by a bundle's `insert` rows. */
-export function bundleEntryIds(patchText: string): string[] {
-  let document
-  try {
-    document = parseDocument(patchText)
-  } catch {
-    return []
-  }
-  const contents = document.contents
-  if (!isSeq(contents)) return []
-
-  const ids: string[] = []
-  for (const row of contents.items) {
-    if (!isMap(row)) continue
-    const insert = row.get('insert')
-    if (!isSeq(insert)) continue
-    for (const entry of insert.items) {
-      if (!isMap(entry)) continue
-      const id = entry.get('id')
-      if (typeof id === 'string') ids.push(id)
-    }
-  }
-  return [...new Set(ids)]
-}
-
-function belongsToPlugin(value: unknown, plugin: string): boolean {
-  return typeof value === 'string' && (value === plugin || value.startsWith(`${plugin}/`))
+function belongsToPlugin(name: unknown, plugin: string): boolean {
+  return typeof name === 'string' && (name === plugin || name.startsWith(`${plugin}/`))
 }
 
 /**
- * Remove rows aimed at a plugin while preserving unrelated rows and comments.
- * This intentionally edits the YAML document instead of reparsing/reprinting
- * the whole file so user-authored formatting survives an uninstall.
+ * Drop the rows a patch layer aims at one plugin.
+ * @param text - the layer as written, comments included.
+ * @param plugin - the package being removed.
+ * @param entryIds - loader entry ids that package declared.
+ * @returns the rewritten layer, and a description of each row dropped. The
+ * text is returned untouched when nothing matched, so an unrelated uninstall
+ * never rewrites the file.
  */
-export function prunePatchLayer(
-  text: string,
-  plugin: string,
-  entryIds: readonly string[]
-): PatchLayerPrune {
+export function prunePatchLayer(text: string, plugin: string, entryIds: readonly string[]): PatchLayerPrune {
   let document
   try {
     document = parseDocument(text)
@@ -56,6 +70,9 @@ export function prunePatchLayer(
 
   const removed: string[] = []
   const kept = []
+  // A comment above the first row is the file's header, which the profile
+  // ships with and the user reads. A comment above any later row is about that
+  // row, so it leaves with it.
   let header: unknown
 
   for (const [index, row] of contents.items.entries()) {
@@ -79,12 +96,15 @@ export function prunePatchLayer(
         removed.push(`insert: ${String(name)}`)
         return false
       })
+      // A row whose whole insert list belonged to the plugin has nothing left
+      // to say; one that still inserts something keeps the rest.
       if (survivors.length === 0 && insert.items.length > 0) {
         if (index === 0) header = row.commentBefore
         continue
       }
       insert.items = survivors
     }
+
     kept.push(row)
   }
 

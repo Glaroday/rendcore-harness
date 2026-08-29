@@ -1,39 +1,67 @@
 import { describe, expect, it } from 'vitest'
 import { bundleEntryIds, prunePatchLayer } from '../src/main/state/patch-layer'
+import { patchLayerInsertedPackages } from '../src/main/state/profile-consistency'
 
-describe('plugin patch-layer cleanup', () => {
-  it('finds declared loader ids and removes only the uninstalled plugin rows', () => {
-    const bundlePatch = `
-- insert:
-    - id: modsearch
-      name: '@liustack/modsearch'
-- insert:
-    - id: unrelated
-      name: '@example/other'
-`
-    expect(bundleEntryIds(bundlePatch)).toEqual(['modsearch', 'unrelated'])
-
-    const userPatch = `# keep this header
-- id: modsearch
+const LAYER = `# Your patch layer for this dsh profile, applied after every bundle layer.
+- id: storage
   config:
-    searchProvider: modsearch
+    backend: sqlite
+- id: theme
+  config:
+    accent: violet
 - insert:
-    - name: '@liustack/modsearch'
-    - name: '@example/other'
+    - id: doudizhu
+      name: dsh-doudizhu
+    - id: my-own
+      name: dsh-my-own
+- insert:
+    - id: doudizhu-ui
+      name: dsh-doudizhu/ui
 `
-    const result = prunePatchLayer(userPatch, '@liustack/modsearch', ['modsearch'])
-    expect(result.removed).toEqual(['id: modsearch', 'insert: @liustack/modsearch'])
-    expect(result.text).toContain("name: '@example/other'")
-    expect(result.text).not.toContain('searchProvider: modsearch')
-    expect(result.text).toContain('# keep this header')
+
+describe('user patch layer', () => {
+  it('reads the entry ids a bundle declares', () => {
+    expect(
+      bundleEntryIds(`- insert:
+    - id: doudizhu
+      name: dsh-doudizhu
+    - id: storage
+      name: dsh-doudizhu-storage
+`)
+    ).toEqual(['doudizhu', 'storage'])
+    expect(bundleEntryIds('not: a list')).toEqual([])
+    expect(bundleEntryIds(':::')).toEqual([])
   })
 
-  it('leaves malformed or unrelated patch layers untouched', () => {
-    expect(prunePatchLayer('not: [valid', 'plugin', ['entry'])).toEqual({
-      text: 'not: [valid',
-      removed: []
-    })
-    const text = '- id: other\n  config: true\n'
-    expect(prunePatchLayer(text, 'plugin', ['entry'])).toEqual({ text, removed: [] })
+  it('drops only the rows aimed at the plugin being removed', () => {
+    const { text, removed } = prunePatchLayer(LAYER, 'dsh-doudizhu', ['storage'])
+
+    // The plugin's own id-targeted row and both of its inserts go.
+    expect(removed).toEqual(['id: storage', 'insert: dsh-doudizhu', 'insert: dsh-doudizhu/ui'])
+    // The user's unrelated override survives, and so does their own insert.
+    expect(text).toContain('id: theme')
+    expect(text).toContain('accent: violet')
+    expect(text).toContain('name: dsh-my-own')
+    expect(text).not.toContain('sqlite')
+    expect(text).not.toContain('dsh-doudizhu')
+    // The header the user reads is part of the file, not noise to rewrite away.
+    expect(text).toContain('# Your patch layer')
+  })
+
+  it('leaves the file byte-identical when nothing names the plugin', () => {
+    const { text, removed } = prunePatchLayer(LAYER, 'dsh-unrelated', ['nothing'])
+    expect(removed).toEqual([])
+    expect(text).toBe(LAYER)
+  })
+
+  it('survives a layer that is empty, malformed, or not a list', () => {
+    for (const input of ['[]\n', '', 'key: value\n', ':::']) {
+      expect(prunePatchLayer(input, 'dsh-doudizhu', ['storage']).removed).toEqual([])
+      expect(patchLayerInsertedPackages(input)).toEqual([])
+    }
+  })
+
+  it('names the packages a layer inserts', () => {
+    expect(patchLayerInsertedPackages(LAYER)).toEqual(['dsh-doudizhu', 'dsh-my-own', 'dsh-doudizhu/ui'])
   })
 })

@@ -37,9 +37,9 @@ export function buildDisclaimedUtilityProcessSpec(
       env: definedEnvironment(spawnOptions.env),
       execArgv: [internalLoaderFlag],
       stdio: 'pipe',
-      serviceName: 'RendCore Harness',
+      serviceName: 'DSH Harness',
       // Harness loads user-installed plugins and can launch third-party tools.
-      // Keep their TCC requests out of RendCore Harness's responsibility chain in production.
+      // Keep their TCC requests out of DSH Desktop's responsibility chain in production.
       disclaim: utilityProcessOptions?.disclaim ?? true
     }
   }
@@ -78,7 +78,7 @@ class UtilityProcessAdapter extends EventEmitter implements HarnessChildProcess 
     super()
     if (!child.stdout || !child.stderr) {
       child.kill()
-      throw new Error('The RendCore Harness utility process did not expose piped output.')
+      throw new Error('The DSH Harness utility process did not expose piped output.')
     }
     this.stdout = child.stdout
     this.stderr = child.stderr

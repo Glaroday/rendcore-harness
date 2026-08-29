@@ -34,7 +34,9 @@ function mountWindowsMenu(): void {
 
   const applyZoomState = (result: unknown): void => {
     const zoomFactor = readZoomFactor(result)
-    if (zoomFactor !== undefined && zoomDisplay) zoomDisplay.textContent = formatZoomPercentage(zoomFactor)
+    if (zoomFactor !== undefined && zoomDisplay) {
+      zoomDisplay.textContent = formatZoomPercentage(zoomFactor)
+    }
   }
   const refreshZoomState = (): void => {
     void ipcRenderer.invoke('desktop-menu:get-zoom-factor').then(applyZoomState).catch((error: unknown) => {
@@ -169,7 +171,9 @@ function renderMenu(
 function readZoomFactor(result: unknown): number | undefined {
   if (typeof result !== 'object' || result === null || !('zoomFactor' in result)) return undefined
   const zoomFactor = result.zoomFactor
-  return typeof zoomFactor === 'number' && Number.isFinite(zoomFactor) && zoomFactor > 0 ? zoomFactor : undefined
+  return typeof zoomFactor === 'number' && Number.isFinite(zoomFactor) && zoomFactor > 0
+    ? zoomFactor
+    : undefined
 }
 
 function applyTheme(isDark: boolean): void {
@@ -179,9 +183,10 @@ function applyTheme(isDark: boolean): void {
 function menuEntries(locale: 'en' | 'zh'): MenuEntry[] {
   const zh = locale === 'zh'
   return [
-    { kind: 'label', label: 'LQY' },
+    { kind: 'label', label: 'HARNESS' },
     { kind: 'command', command: 'connect-phone', label: zh ? '连接手机…' : 'Connect Phone…', shortcut: 'Ctrl+Shift+M' },
     { kind: 'command', command: 'restart-harness', label: zh ? '重启 Harness' : 'Restart Harness', shortcut: 'Ctrl+Shift+R' },
+    { kind: 'command', command: 'safe-mode', label: zh ? '以安全模式重启…' : 'Restart as Safe Mode…' },
     { kind: 'command', command: 'show-harness-log', label: zh ? '显示 Harness 日志' : 'Show Harness Log' },
     { kind: 'command', command: 'check-for-updates', label: zh ? '检查更新…' : 'Check for Updates…', shortcut: 'Ctrl+U' },
     { kind: 'separator' },
@@ -207,9 +212,19 @@ function menuEntries(locale: 'en' | 'zh'): MenuEntry[] {
 const chevronIcon = `<svg viewBox="0 0 20 20" width="17" height="17" fill="none" aria-hidden="true"><path d="m6.5 8 3.5 3.5L13.5 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 
 const menuStyles = `
-  :root { color-scheme: light; --label-primary:#202124; --label-secondary:#61666b; --label-tertiary:#81858c; --hover:rgba(32,33,36,.08); --surface:#fff; --border:rgba(32,33,36,.13); --separator:rgba(32,33,36,.09); --layer:rgba(32,33,36,.06); --danger:#d93025; }
-  :root[data-theme="dark"] { color-scheme: dark; --label-primary:#f3f4f6; --label-secondary:#b5b7bd; --label-tertiary:#92959b; --hover:rgba(255,255,255,.09); --surface:#28282b; --border:rgba(255,255,255,.12); --separator:rgba(255,255,255,.09); --layer:rgba(255,255,255,.07); --danger:#ee7772; }
-  * { box-sizing:border-box; }
+  :root {
+    color-scheme: light;
+    --label-primary: #202124; --label-secondary: #61666b; --label-tertiary: #81858c;
+    --hover: rgba(32,33,36,.08); --surface: #fff; --border: rgba(32,33,36,.13);
+    --separator: rgba(32,33,36,.09); --layer: rgba(32,33,36,.06); --danger: #d93025;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --label-primary: #f3f4f6; --label-secondary: #b5b7bd; --label-tertiary: #92959b;
+    --hover: rgba(255,255,255,.09); --surface: #28282b; --border: rgba(255,255,255,.12);
+    --separator: rgba(255,255,255,.09); --layer: rgba(255,255,255,.07); --danger: #ee7772;
+  }
+  * { box-sizing: border-box; }
   html, body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; }
   body { color:var(--label-primary); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; user-select:none; }
   .bar { position:relative; width:100%; height:100%; display:flex; justify-content:flex-end; align-items:flex-start; }

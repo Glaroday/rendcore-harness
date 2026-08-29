@@ -6,6 +6,16 @@ import { homedir } from 'node:os'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { PassThrough } from 'node:stream'
+
+import { installGeneration } from './generations/installer.mjs'
+import { projectGenerations } from './generations/projection.mjs'
+import {
+  listGenerations,
+  readDesired,
+  withRegistryLock,
+  writeDesired
+} from './generations/registry.mjs'
 import { SIDELINE_MARKER } from './pnpm-runner.mjs'
 import { removeTree } from './remove-tree.mjs'
 
@@ -28,6 +38,29 @@ function dshHome() {
 
 export function profileDirectory(home = dshHome()) {
   return join(home, 'profiles', MARKET_PROFILE)
+}
+
+const LEGACY_PACKAGE_IMPORT_METHOD = /^package-import-method=clone-or-copy(?:\r?\n|$)/mu
+const LEGACY_CHILD_CONCURRENCY = /^child-concurrency=1(?:\r?\n|$)/mu
+
+/**
+ * Remove only the exact pair of slow Windows settings written by older
+ * Desktop releases. Treat every other byte as profile-owned: this file can
+ * carry the store pin, registries, proxies, certificates, and credentials.
+ */
+export function updateProfileNpmrc(npmrc) {
+  const newline = npmrc.includes('\r\n') ? '\r\n' : '\n'
+  if (npmrc === '') return `side-effects-cache=false${newline}`
+
+  // Requiring the pair distinguishes Desktop's historical block from a user
+  // who deliberately chose just one of these otherwise valid pnpm settings.
+  if (!LEGACY_PACKAGE_IMPORT_METHOD.test(npmrc) || !LEGACY_CHILD_CONCURRENCY.test(npmrc)) {
+    return npmrc
+  }
+  const updated = npmrc
+    .replace(LEGACY_PACKAGE_IMPORT_METHOD, '')
+    .replace(LEGACY_CHILD_CONCURRENCY, '')
+  return updated === '' ? `side-effects-cache=false${newline}` : updated
 }
 
 /** Leftovers of an interrupted pnpm run, or of a Windows locked-rename recovery. */
@@ -182,7 +215,7 @@ export async function ensurePnpmShim(home = dshHome()) {
   const executable = process.execPath
 
   // pnpm is reached through this shim by every profile package operation —
-  // RendCore Harness's installer and the community market alike — so the runner it
+  // DSH Desktop's installer and the community market alike — so the runner it
   // points at is where a Windows locked rename gets recovered for both. A
   // runner that cannot be staged must not take the shims down with it: pnpm
   // still has to be reachable, just without the recovery, and the harness log
@@ -231,18 +264,27 @@ export async function ensurePnpmShim(home = dshHome()) {
     await chmod(nodePath, 0o755)
   }
 
-  // Also write .npmrc in profiles/web to prevent Windows file lock conflicts and racing worker threads
+  // Migrate only the exact package-import-method/child-concurrency pair that
+  // older Desktop releases wrote. pnpm then uses its defaults (hardlink, auto
+  // concurrency), while user configuration and the profile store pin survive:
+  // forcing clone-or-copy made every install do a full physical file copy
+  // across the profile's 150+ packages, turning installs that should take
+  // seconds into multi-minute (up to 30-minute) waits on Windows. The
+  // Windows locked-rename problem this was meant to route around is handled
+  // by the dedicated lock-recovery runner instead (see pnpm-runner.mjs).
   const profileDir = profileDirectory(home)
   await mkdir(profileDir, { recursive: true })
   const npmrcPath = join(profileDir, '.npmrc')
-  const npmrcContent = [
-    'package-import-method=clone-or-copy',
-    'child-concurrency=1',
-    'side-effects-cache=false'
-  ].join('\n') + '\n'
+  let npmrcContent
   try {
-    if (!existsSync(npmrcPath)) {
-      await writeFile(npmrcPath, npmrcContent, 'utf8')
+    npmrcContent = await readFile(npmrcPath, 'utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT') npmrcContent = ''
+  }
+  try {
+    if (npmrcContent !== undefined) {
+      const updatedNpmrc = updateProfileNpmrc(npmrcContent)
+      if (updatedNpmrc !== npmrcContent) await atomicWrite(npmrcPath, updatedNpmrc)
     }
   } catch {
     // ignore
@@ -277,10 +319,14 @@ export function buildPnpmEnvironment(
   environment = process.env,
   executablePath = process.execPath
 ) {
+  // The child is spawned as `process.execPath`, which on macOS is the Electron
+  // helper binary: it only runs the dsh CLI as Node when ELECTRON_RUN_AS_NODE
+  // is set. The harness entry (harness-node-entry.mjs) declares that flag in
+  // its own environment so that children spawned here inherit Node mode —
+  // deleting it here makes the helper exit 0 without ever running the CLI,
+  // which the market then mistakes for a successful pnpm run. Pass it through;
+  // the bundled-Node hosts (Windows, Linux) never set it and are unaffected.
   const result = { ...environment }
-  for (const key of Object.keys(result)) {
-    if (key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') delete result[key]
-  }
 
   const seen = new Set()
   const paths = [binDirectory, dirname(executablePath), ...processPath(environment).split(delimiter)]
@@ -297,12 +343,7 @@ export function buildPnpmEnvironment(
   if (process.platform === 'win32') result.Path = value
   result.CI = 'true'
   result.NO_COLOR = '1'
-  result.PNPM_MAX_WORKERS = '1'
-  result.npm_config_child_concurrency = '1'
-  result.npm_config_package_import_method = 'clone-or-copy'
   result.npm_config_side_effects_cache = 'false'
-  result.PNPM_CONFIG_CHILD_CONCURRENCY = '1'
-  result.PNPM_CONFIG_PACKAGE_IMPORT_METHOD = 'clone-or-copy'
   result.PNPM_CONFIG_SIDE_EFFECTS_CACHE = 'false'
   return result
 }
@@ -317,7 +358,7 @@ export function createDesktopProfilesService(home = dshHome()) {
     list: () => [current],
     select: async (name) => {
       if (name !== MARKET_PROFILE) {
-        throw new Error(`RendCore Harness only exposes the ${MARKET_PROFILE} profile.`)
+        throw new Error(`DSH Desktop only exposes the ${MARKET_PROFILE} profile.`)
       }
     }
   })
@@ -347,9 +388,98 @@ export function createDesktopPnpmService(options) {
   let active
   let closed = false
 
+  const pnpmEntryPath = resolvePnpmEntry()
+
+  /**
+   * A synthetic handle in the shape `runPlugin` returns, driven by an async
+   * function rather than a child process. dsh-market reads `stdout`/`stderr`
+   * as streams and awaits `done` for `{ exitCode, signal }`.
+   */
+  const asHandle = (task) => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    let cancelled = false
+    const cancel = () => {
+      cancelled = true
+    }
+    const done = (async () => {
+      try {
+        const { exitCode, message } = await task({
+          write: (line) => stdout.write(`${line}\n`),
+          isCancelled: () => cancelled
+        })
+        if (message) stderr.write(message)
+        return { exitCode, signal: null }
+      } catch (error) {
+        stderr.write(error instanceof Error ? error.message : String(error))
+        return { exitCode: 1, signal: null }
+      } finally {
+        stdout.end()
+        stderr.end()
+      }
+    })()
+    return { stdout, stderr, done, cancel }
+  }
+
+  /**
+   * The install boundary dsh-market 1.6+ feature-detects. It hands us
+   * `['add', 'name@exact.version', ...flags]` — a registry package pinned to an
+   * exact version — and expects the same handle `runPlugin` returns.
+   *
+   * The plugin is installed as its own immutable generation rather than into
+   * the shared hoisted tree: a fresh directory, promoted by one rename, never
+   * replaced. On Windows that is the whole fix — the shared tree's in-place
+   * package replacement is the operation pnpm cannot do there.
+   */
+  const runExternalMarketPluginInstall = (args, invokingDir, signal) => {
+    validatePluginOperation(args, invokingDir)
+    if (closed) throw new Error('The DSH Desktop pnpm service has been disposed.')
+    if (active) throw new Error('Another desktop pnpm operation is already running.')
+    const spec = args.slice(1).find((argument) => !argument.startsWith('-'))
+    if (spec === undefined) throw new Error('The install boundary needs a package spec.')
+
+    const handle = asHandle(async ({ write }) =>
+      withRegistryLock(home, async () => {
+        write(`Installing ${spec} as an isolated generation…`)
+        const install = await installGeneration({
+          dshHome: home,
+          pluginSpec: spec,
+          nodeExecutablePath: executablePath,
+          pnpmEntryPath,
+          spawnProcess,
+          environment,
+          onTrace: write,
+          onOutput: (chunk) => write(chunk.replace(/\r?\n$/u, '')),
+          runInstall: options.runGenerationInstall
+        })
+        if (!install.ok) return { exitCode: 1, message: install.detail ?? 'generation install failed' }
+
+        // Replace any earlier generation of the same plugin, keep the rest.
+        const [desired, generations] = await Promise.all([readDesired(home), listGenerations(home)])
+        const byId = new Map(generations.map((generation) => [generation.id, generation]))
+        const kept = desired.filter((id) => {
+          const generation = byId.get(id)
+          return generation === undefined || generation.pluginName !== install.generation.pluginName
+        })
+        await writeDesired(home, [...kept, install.generation.id])
+        const projection = await projectGenerations(home)
+        write(`enabled: ${projection.linked.join(', ')}`)
+        write(`bundles: ${JSON.stringify(projection.bundles)}`)
+        return { exitCode: 0 }
+      })
+    )
+    active = handle
+    signal?.addEventListener('abort', handle.cancel, { once: true })
+    void handle.done.finally(() => {
+      signal?.removeEventListener('abort', handle.cancel)
+      if (active === handle) active = undefined
+    })
+    return handle
+  }
+
   const runPlugin = (args, invokingDir, signal) => {
     validatePluginOperation(args, invokingDir)
-    if (closed) throw new Error('The RendCore Harness pnpm service has been disposed.')
+    if (closed) throw new Error('The DSH Desktop pnpm service has been disposed.')
     if (signal?.aborted) throw signal.reason ?? new Error('The package operation was aborted.')
     if (active) throw new Error('Another desktop pnpm operation is already running.')
 
@@ -394,6 +524,7 @@ export function createDesktopPnpmService(options) {
 
   return Object.freeze({
     runPlugin,
+    runExternalMarketPluginInstall,
     async dispose() {
       closed = true
       const operation = active
@@ -429,8 +560,12 @@ export function buildUninstallArguments(dshEntry = resolveDshEntry()) {
 
 async function atomicWrite(path, contents) {
   const temporary = `${path}.dsh-desktop-${process.pid}-${Date.now()}.tmp`
-  await writeFile(temporary, contents, 'utf8')
-  await rename(temporary, path)
+  try {
+    await writeFile(temporary, contents, 'utf8')
+    await rename(temporary, path)
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined)
+  }
 }
 
 function killProcessTree(child) {

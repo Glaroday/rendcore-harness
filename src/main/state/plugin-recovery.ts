@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { lstat, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { parse } from 'yaml'
 import { removeTree } from './remove-tree'
@@ -91,6 +91,47 @@ function configuredProfilePlugins(manifest: ProfileManifest): string[] {
   return plugins
 }
 
+/**
+ * User-installed bundle packages that Safe Mode can manage without starting
+ * Harness. Reading both dependencies and bundles avoids presenting transitive
+ * packages as plugins, or offering to remove a package that is not active in
+ * the profile.
+ */
+export async function listInstalledProfilePlugins(dshHome: string): Promise<string[]> {
+  try {
+    const manifest = JSON.parse(
+      await readFile(profilePackageJsonPath(dshHome), 'utf8')
+    ) as ProfileManifest
+    const plugins = configuredProfilePlugins(manifest)
+    const modulesDirectory = join(dshHome, 'profiles', 'web', 'node_modules')
+    const entries = await Promise.all(
+      plugins.map(async (name, index) => {
+        try {
+          const info = await lstat(join(modulesDirectory, name))
+          // Profiles do not persist an installedAt field. The root package
+          // entry is created or replaced by pnpm during installation/update,
+          // making its newest filesystem timestamp the closest generic signal
+          // available for presenting recently installed plugins first.
+          return { name, index, installedAt: Math.max(info.birthtimeMs, info.mtimeMs) }
+        } catch {
+          return { name, index, installedAt: undefined }
+        }
+      })
+    )
+    entries.sort((left, right) => {
+      if (left.installedAt === undefined && right.installedAt === undefined) {
+        return left.index - right.index
+      }
+      if (left.installedAt === undefined) return 1
+      if (right.installedAt === undefined) return -1
+      return right.installedAt - left.installedAt || left.index - right.index
+    })
+    return entries.map(({ name }) => name)
+  } catch {
+    return []
+  }
+}
+
 async function bundleOwnsPackage(
   profileDirectory: string,
   bundle: string,
@@ -167,7 +208,7 @@ async function pluginMatchesSlot(
     try {
       const content = await readFile(join(packageDir, file), 'utf8')
       if (content.includes(slotName)) return true
-    } catch {}
+    } catch { }
   }
   return false
 }
@@ -193,10 +234,10 @@ async function packagesProvidingSlot(
             providers.push(packageName)
             break
           }
-        } catch {}
+        } catch { }
       }
     }
-  } catch {}
+  } catch { }
 
   return providers
 }
@@ -216,13 +257,13 @@ async function pluginReferencesPackage(
       ...Object.keys(manifest.optionalDependencies ?? {})
     ])
     if ([...packageNames].some((packageName) => declaredPackages.has(packageName))) return true
-  } catch {}
+  } catch { }
 
   for (const file of ['cordis.patch.yml', 'index.js', 'lib/index.js', 'dist/index.js']) {
     try {
       const content = await readFile(join(packageDirectory, file), 'utf8')
       if ([...packageNames].some((packageName) => content.includes(packageName))) return true
-    } catch {}
+    } catch { }
   }
   return false
 }
@@ -334,6 +375,49 @@ export async function resolveProfileRecoveryPlugins(
   }
 }
 
+/**
+ * Loader entry ids the installed plugin declares. Read before removal — the
+ * bundle patch that names them goes away with the package.
+ */
+export async function pluginDeclaredEntryIds(
+  profileDirectory: string,
+  pluginName: string
+): Promise<string[]> {
+  const packageDirectory = join(profileDirectory, 'node_modules', pluginName)
+  try {
+    const manifest = JSON.parse(
+      await readFile(join(packageDirectory, 'package.json'), 'utf8')
+    ) as BundleManifest
+    const patch = manifest.dsh?.bundle?.patch
+    if (!patch) return []
+    return bundleEntryIds(await readFile(resolve(packageDirectory, patch), 'utf8'))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Drop the user patch-layer rows aimed at a plugin that is being removed.
+ * @returns a description of each row dropped, empty when the layer said
+ * nothing about this plugin.
+ */
+export async function prunePluginPatchLayer(
+  dshHome: string,
+  pluginName: string,
+  entryIds: readonly string[]
+): Promise<string[]> {
+  const patchPath = profileCordisPatchPath(dshHome)
+  try {
+    const text = await readFile(patchPath, 'utf8')
+    const pruned = prunePatchLayer(text, pluginName, entryIds)
+    if (pruned.removed.length === 0) return []
+    await writeFile(patchPath, pruned.text, 'utf8')
+    return pruned.removed
+  } catch {
+    return []
+  }
+}
+
 export async function uninstallPluginFromProfile(
   dshHome: string,
   pluginName: string,
@@ -378,49 +462,17 @@ export async function uninstallPluginFromProfile(
     }
 
     await prunePluginPatchLayer(dshHome, pluginName, entryIds)
+
     return true
   } catch {
     return false
   }
 }
 
-/** Read loader ids before the package is removed from node_modules. */
-export async function pluginDeclaredEntryIds(
-  profileDirectory: string,
-  pluginName: string
-): Promise<string[]> {
-  const packageDirectory = join(profileDirectory, 'node_modules', pluginName)
-  try {
-    const manifest = JSON.parse(await readFile(join(packageDirectory, 'package.json'), 'utf8')) as BundleManifest
-    const patch = manifest.dsh?.bundle?.patch
-    if (!patch) return []
-    return bundleEntryIds(await readFile(resolve(packageDirectory, patch), 'utf8'))
-  } catch {
-    return []
-  }
-}
-
-/** Remove patch-layer rows that reference the plugin being removed. */
-export async function prunePluginPatchLayer(
-  dshHome: string,
-  pluginName: string,
-  entryIds: readonly string[]
-): Promise<string[]> {
-  const patchPath = profileCordisPatchPath(dshHome)
-  try {
-    const text = await readFile(patchPath, 'utf8')
-    const pruned = prunePatchLayer(text, pluginName, entryIds)
-    if (pruned.removed.length === 0) return []
-    await writeFile(patchPath, pruned.text, 'utf8')
-    return pruned.removed
-  } catch {
-    return []
-  }
-}
-
 export async function resetPluginProfile(
   dshHome: string,
-  failingPlugin?: string
+  failingPlugin?: string,
+  matchRelatedPackages = true
 ): Promise<boolean> {
   const manifestPath = profilePackageJsonPath(dshHome)
   if (!existsSync(manifestPath)) return false
@@ -440,9 +492,11 @@ export async function resetPluginProfile(
         }
         for (const dep of Object.keys(manifest.dependencies)) {
           if (
-            failingPlugin.includes(dep) ||
-            dep.includes(failingPlugin) ||
-            (scope && dep.startsWith(scope))
+            matchRelatedPackages && (
+              failingPlugin.includes(dep) ||
+              dep.includes(failingPlugin) ||
+              (scope && dep.startsWith(scope))
+            )
           ) {
             delete manifest.dependencies[dep]
             modified = true
@@ -454,9 +508,11 @@ export async function resetPluginProfile(
         manifest.dsh.profile.bundles = manifest.dsh.profile.bundles.filter(
           (b) =>
             b !== failingPlugin &&
-            !failingPlugin.includes(b) &&
-            !b.includes(failingPlugin) &&
-            (!scope || !b.startsWith(scope))
+            (!matchRelatedPackages || (
+              !failingPlugin.includes(b) &&
+              !b.includes(failingPlugin) &&
+              (!scope || !b.startsWith(scope))
+            ))
         )
         if (manifest.dsh.profile.bundles.length !== origLen) {
           modified = true
@@ -484,8 +540,9 @@ export async function resetPluginProfile(
       await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
     }
 
-    // Keep unrelated user overrides when removing one plugin. A full reset
-    // without a specific plugin still intentionally clears the whole layer.
+    // The user patch layer is the user's own work. Removing one plugin takes
+    // the rows aimed at that plugin and nothing else; only a reset with no
+    // plugin named — the deliberate "start over" — clears the whole layer.
     const patchPath = profileCordisPatchPath(dshHome)
     if (existsSync(patchPath)) {
       if (failingPlugin) {
@@ -516,9 +573,17 @@ export async function resetPluginProfile(
               if (files.length === 0) {
                 await removeTree(scopeDir).catch(() => undefined)
               }
-            } catch {}
+            } catch { }
           }
         }
+      }
+    }
+
+    const packagesDir = join(dshHome, 'profiles', 'web', 'packages')
+    if (failingPlugin && existsSync(packagesDir)) {
+      const packageSourceDir = join(packagesDir, failingPlugin)
+      if (existsSync(packageSourceDir)) {
+        await removeTree(packageSourceDir).catch(() => undefined)
       }
     }
 

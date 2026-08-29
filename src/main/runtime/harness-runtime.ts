@@ -1,15 +1,11 @@
-import type { SpawnOptionsWithoutStdio } from 'node:child_process'
+import { execFileSync, type SpawnOptionsWithoutStdio } from 'node:child_process'
 import type { EventEmitter } from 'node:events'
 import { createWriteStream, existsSync, mkdirSync, type WriteStream } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { dirname, join } from 'node:path'
-import { parse, stringify } from 'yaml'
 import type { RuntimePhase, RuntimeSnapshot } from '../../shared/contracts'
-
-export const RENDCORE_MODELS_ENDPOINT = 'http://47.103.24.134:18036/v1/models'
-export const RENDCORE_MODEL_CAPABILITIES_ENDPOINT = 'http://47.103.24.134:8600/api/models'
-const RENDCORE_SAFE_DEFAULT_MODEL = 'gpt-5.6-sol'
+import { prepareRendCoreModelCatalog } from './rendcore-model-catalog'
 
 export interface HarnessRuntimeOptions {
   dshEntryPath: string
@@ -34,9 +30,163 @@ export interface HarnessChildProcess extends EventEmitter {
   kill(signal?: NodeJS.Signals): boolean
 }
 
-export function buildHarnessArguments(port: number, patchPath?: string): string[] {
+/**
+ * Resolve the user's interactive login shell environment.
+ *
+ * Electron apps launched from macOS Finder/Spotlight inherit a minimal
+ * environment from launchd that never sources the user's shell profile
+ * (~/.zshenv, ~/.zprofile, ~/.zshrc). This leaves PATH without Homebrew,
+ * mise shims, ~/.local/bin, etc., so CLIs like bun, lark-cli, and docker
+ * are invisible to the Harness process and every subprocess it spawns.
+ *
+ * On Windows the same gap exists when tools are added via a PowerShell
+ * profile ($PROFILE) rather than the user-level registry environment —
+ * `cmd /c set` only sees registry vars, so we use PowerShell with the
+ * profile loaded to capture the full set.
+ *
+ * This function shells out once to capture the full environment the user
+ * would have in a terminal, and returns it for use as the Harness spawn
+ * base. On any failure it falls back to `process.env` to preserve the
+ * current behavior.
+ *
+ * The result is memoised for the process lifetime.
+ */
+let resolvedShellEnvironment: NodeJS.ProcessEnv | undefined
+
+export function resolveShellEnvironment(): NodeJS.ProcessEnv {
+  if (resolvedShellEnvironment !== undefined) return resolvedShellEnvironment
+
+  try {
+    if (process.platform === 'win32') {
+      // PowerShell with the user profile loaded captures both registry
+      // environment variables and any PATH additions sourced in $PROFILE
+      // (e.g. conda activate, nvm use, scoop shim).  -OutputFormat Text
+      // avoids BOM/XML wrapping.
+      const output = execFileSync(
+        'powershell',
+        [
+          '-NoLogo',
+          '-NonInteractive',
+          '-OutputFormat', 'Text',
+          '-Command',
+          // Windows PowerShell writes stdout in the console codepage, not
+          // UTF-8, and we decode as UTF-8 below. On a CJK install (ACP 936)
+          // every non-ASCII byte then arrives as U+FFFD, so a user profile
+          // directory like C:\Users\数据项素 comes back as eight replacement
+          // characters — and TEMP, captured here and passed to Harness
+          // unchanged, points nowhere. Harness dies in mkdtemp before it can
+          // load a plugin tree. Pinning the output encoding is what makes the
+          // decode below true; dropping undecodable values is the belt to its
+          // braces.
+          '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ' +
+          // Dot-source the profile (suppress errors if it doesn't exist),
+          // then emit NAME=VALUE for every environment variable.
+          '. $PROFILE 2>$null; Get-ChildItem Env: | ForEach-Object { "$($_.Name)=$($_.Value)" }'
+        ],
+        {
+          encoding: 'utf8',
+          timeout: 15_000,
+          stdio: ['ignore', 'pipe', 'ignore']
+        }
+      )
+      resolvedShellEnvironment = withoutUndecodableValues(
+        parseEnvOutput(output, /\r?\n/),
+        process.env
+      )
+    } else {
+      // macOS / Linux: run a login + interactive shell so both .zprofile
+      // (Homebrew, OrbStack) and .zshrc (mise shims, ~/.local/bin, cargo,
+      // go, etc.) are sourced.  stderr is ignored to suppress prompt noise.
+      const shell = process.env.SHELL ?? '/bin/sh'
+      const output = execFileSync(shell, ['-l', '-i', '-c', 'env'], {
+        encoding: 'utf8',
+        timeout: 10_000,
+        stdio: ['ignore', 'pipe', 'ignore']
+      })
+      resolvedShellEnvironment = parseEnvOutput(output, /\n/)
+    }
+  } catch {
+    // Shell capture failed — stay silent and keep the inherited environment.
+    resolvedShellEnvironment = process.env
+  }
+
+  return resolvedShellEnvironment
+}
+
+/**
+ * Replace captured values that lost characters in decoding with the ones this
+ * process already holds.
+ *
+ * A value carrying U+FFFD did not survive the trip out of the shell, and there
+ * is no recovering the original from it — the byte that produced it is gone.
+ * Passing it on is the harmful option: `TEMP` from a mis-decoded capture names
+ * a directory that does not exist, and Harness fails in `mkdtemp` before it
+ * loads anything, which reads as a launch that hangs. The inherited value is
+ * always intact, because it never went through a console.
+ *
+ * A variable that exists only in the shell profile and mis-decoded has no
+ * fallback to take; it is dropped rather than passed on broken, which leaves
+ * the consumer to its own default instead of pointing it somewhere wrong.
+ * @param captured - what the shell reported.
+ * @param inherited - this process's own environment.
+ */
+export function withoutUndecodableValues(
+  captured: NodeJS.ProcessEnv,
+  inherited: NodeJS.ProcessEnv
+): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = {}
+  for (const [name, value] of Object.entries(captured)) {
+    if (value === undefined || !value.includes('�')) {
+      result[name] = value
+      continue
+    }
+    const fallback = inherited[name]
+    if (fallback !== undefined) result[name] = fallback
+  }
+  return result
+}
+
+function parseEnvOutput(output: string, lineSeparator: RegExp): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const line of output.split(lineSeparator)) {
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    env[line.slice(0, eq)] = line.slice(eq + 1)
+  }
+  return env
+}
+
+/**
+ * The process launch token from the Harness URL line.
+ *
+ * Since 0.1.2-alpha.1 the Host authenticates the whole API before dispatch:
+ * `dsh-web-app` prints one root URL carrying a per-process token, and only
+ * `GET /?token=...` exchanges it for the signed, authority-bound session
+ * cookie. API paths and Authorization headers do not accept the token, so
+ * every desktop-side consumer — the window and the mobile bridge alike —
+ * has to start from this line.
+ *
+ * @param line - one line of Harness stdout.
+ * @returns the token, or undefined when the line is not the URL line.
+ */
+export function extractLaunchToken(line: string): string | undefined {
+  const match = /\bdsh web:\s*(\S+)/u.exec(line)
+  if (!match?.[1]) return undefined
+  try {
+    const token = new URL(match[1]).searchParams.get('token')
+    return token === null || token === '' ? undefined : token
+  } catch {
+    return undefined
+  }
+}
+
+export function buildHarnessArguments(
+  port: number,
+  patchPath?: string,
+  profile = 'web'
+): string[] {
   return [
-    'web',
+    ...(profile === 'web' ? ['web'] : ['--profile', profile]),
     ...(patchPath ? ['--patch', patchPath] : []),
     // The desktop window is the only intended surface. Without this, Harness
     // hands the same loopback URL to the system browser on every launch.
@@ -56,32 +206,43 @@ export function buildHarnessSpawnOptions(
 ): SpawnOptionsWithoutStdio {
   const {
     ELECTRON_RUN_AS_NODE: _runAsNode,
-    // Keep credentials file-backed and writable from Settings > Models. An
-    // inherited env value is deliberately treated as read-only by DSH.
-    RENDCORE_API_KEY: _rendCoreApiKey,
+    RENDCORE_API_KEY: _rendcoreApiKey,
     ...parentEnvironment
   } = environment
   const pathKey = platform === 'win32' ? 'Path' : 'PATH'
 
+  // ELECTRON_RUN_AS_NODE must not reach the Harness process itself: the macOS
+  // utility process is launched with Chromium switches (--type=utility, …)
+  // that Node rejects as bad options. The Harness entry re-declares Node mode
+  // from the inside, for its children only.
+  //
+  // On Windows, `detached: true` puts the Harness in its own process group
+  // and console. Without it, a child process that calls `os.kill(pid, 0)`
+  // (POSIX "liveness probe") ends up broadcasting a Ctrl+C to every process
+  // sharing the desktop's console — including the desktop main process, which
+  // exits silently. This is the same isolation that the Harness's own
+  // subprocess layer is expected to apply; we apply it here so the desktop
+  // shell never becomes collateral damage for a buggy child (issue #208).
   return {
     cwd: launchDirectory,
     env: {
       ...parentEnvironment,
       DSH_HOME: dshHome,
       NO_COLOR: '1',
-      // Keep pnpm's child processes bounded and preserve the same behavior
-      // when it is launched through Electron's bundled Node runtime.
-      PNPM_MAX_WORKERS: '1',
-      npm_config_child_concurrency: '1',
-      npm_config_package_import_method: 'clone-or-copy',
+      // package-import-method/child-concurrency are left at pnpm's defaults
+      // (hardlink, auto concurrency): forcing clone-or-copy made every
+      // install do a full physical file copy across the profile's 150+
+      // packages, which is what turned installs that should take seconds
+      // into multi-minute (up to 30-minute) waits on Windows. The Windows
+      // locked-rename problem this was meant to route around is handled by
+      // the dedicated lock-recovery runner instead (see pnpm-runner.mjs).
       npm_config_side_effects_cache: 'false',
-      PNPM_CONFIG_CHILD_CONCURRENCY: '1',
-      PNPM_CONFIG_PACKAGE_IMPORT_METHOD: 'clone-or-copy',
       PNPM_CONFIG_SIDE_EFFECTS_CACHE: 'false',
       [pathKey]: environment[pathKey] ?? environment.PATH ?? ''
     },
     stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true
+    windowsHide: true,
+    detached: platform === 'win32'
   }
 }
 
@@ -89,13 +250,14 @@ export function buildNodeArguments(
   nodeEntryPath: string,
   dshEntryPath: string,
   port: number,
-  patchPath?: string
+  patchPath?: string,
+  profile = 'web'
 ): string[] {
   return [
     '--expose-internals',
     nodeEntryPath,
     dshEntryPath,
-    ...buildHarnessArguments(port, patchPath)
+    ...buildHarnessArguments(port, patchPath, profile)
   ]
 }
 
@@ -113,44 +275,20 @@ export function updateReadyStability(
   }
 }
 
-export function extractRendCoreModelBlock(source: string): string | undefined {
-  return source.match(
-    /\r?\n        models:\r?\n([\s\S]*?)(?=\r?\n\r?\n\S)/
-  )?.[1]
-}
-
-export function replaceRendCoreModelBlock(source: string, modelBlock: string): string {
-  const marker = /\r?\n        models:\r?\n[\s\S]*?(?=\r?\n\r?\n\S)/
-  if (!marker.test(source)) throw new Error('RendCore provider model block was not found')
-  const eol = source.includes('\r\n') ? '\r\n' : '\n'
-  const normalizedBlock = modelBlock.replace(/\r?\n/g, eol)
-  return source.replace(
-    marker,
-    `${eol}        models:${eol}${normalizedBlock}`
-  )
-}
-
-/** Pick the largest online chat model for compaction summaries. */
-export function selectRendCoreCompactionModel(
-  models: readonly OnlineModelEntry[]
-): string {
-  return [...models]
-    .filter((model) => !isImageGenerationOnlyModel(model.id))
-    .sort((left, right) => {
-      const contextDelta = (right.contextWindow ?? 0) - (left.contextWindow ?? 0)
-      if (contextDelta !== 0) return contextDelta
-      const outputDelta = (right.maxTokens ?? 0) - (left.maxTokens ?? 0)
-      if (outputDelta !== 0) return outputDelta
-      return left.id.localeCompare(right.id)
-    })[0]?.id ?? RENDCORE_SAFE_DEFAULT_MODEL
-}
-
-/** Replace the startup compaction target without touching the model catalog. */
-export function replaceRendCoreCompactionModel(source: string, model: string): string {
-  const marker = /(summarizationProvider:\s*rendcore\r?\n\s+summarizationModel:\s*)[^\r\n]+/
-  if (!marker.test(source)) throw new Error('RendCore compaction configuration was not found')
-  const normalized = model.replace(/[\r\n]/g, '')
-  return source.replace(marker, `$1${normalized}`)
+/**
+ * A loopback response proves only that the Host has opened its port. Since
+ * 0.1.2-alpha.1 the renderer also needs the per-process launch token printed
+ * on stdout; navigating before that line arrives produces the authentication
+ * error page instead of exchanging the token for a session cookie.
+ *
+ * The unauthenticated readiness probe is expected to receive 401, so any
+ * non-server-error response is acceptable once the token is available.
+ */
+export function isHarnessStartupProbeHealthy(
+  status: number,
+  launchToken: string | undefined
+): boolean {
+  return launchToken !== undefined && status >= 200 && status < 500
 }
 
 export class HarnessRuntime {
@@ -160,7 +298,12 @@ export class HarnessRuntime {
   private message = 'Harness is not running.'
   private launchDirectory?: string
   private url?: string
+  private launchToken?: string
   private readonly logLines: string[] = []
+  private readonly logRemainders: Record<'stdout' | 'stderr', string> = {
+    stdout: '',
+    stderr: ''
+  }
 
   constructor(private readonly options: HarnessRuntimeOptions) {}
 
@@ -170,14 +313,18 @@ export class HarnessRuntime {
       message: this.message,
       launchDirectory: this.launchDirectory,
       url: this.url,
+      authToken: this.launchToken,
       logs: [...this.logLines]
     }
   }
 
-  async start(launchDirectory: string): Promise<void> {
+  async start(launchDirectory: string, profile = 'web'): Promise<void> {
     await this.stop()
+    this.logRemainders.stdout = ''
+    this.logRemainders.stderr = ''
     this.launchDirectory = launchDirectory
     this.url = undefined
+    this.launchToken = undefined
 
     if (!existsSync(this.options.dshEntryPath)) {
       this.setState('failed', `Harness entry was not found: ${this.options.dshEntryPath}`)
@@ -198,84 +345,13 @@ export class HarnessRuntime {
 
     await mkdir(this.options.dshHome, { recursive: true })
     await mkdir(dirname(this.options.logPath), { recursive: true })
-    this.logStream = createWriteStream(this.options.logPath, { flags: 'a' })
+    this.logStream ??= createWriteStream(this.options.logPath, { flags: 'a' })
 
-    const [apiKey, capabilityResult] = await Promise.all([
-      readStoredRendCoreApiKey(this.options.dshHome),
-      fetchRendCoreModelCapabilities().then(
-        (models) => ({ models }),
-        (error: unknown) => ({
-          models: [] as OnlineModelEntry[],
-          error: error instanceof Error ? error.message : String(error)
-        })
-      )
-    ])
-    const capabilityModels = capabilityResult.models
-    if ('error' in capabilityResult) {
-      this.writeLog(`[desktop] RendCore capability discovery failed: ${capabilityResult.error}`)
-    } else {
-      this.writeLog(`[desktop] loaded capabilities for ${capabilityModels.length} RendCore models`)
-    }
-    const cachedPath = join(this.options.dshHome, 'rendcore-online.patch.yml')
-    let patchPath = this.options.dshPatchPath
-
-    // Refresh before composing the profile so additions and removals from the
-    // gateway take effect on this restart. A cached catalog remains the fast
-    // fallback when the endpoint is temporarily unavailable.
-    let onlineCatalog: OnlinePatchResult | undefined
-    if (apiKey) {
-      try {
-        onlineCatalog = await createOnlineRendCorePatch(
-          this.options.dshPatchPath,
-          this.options.dshHome,
-          apiKey,
-          capabilityModels
-        )
-        patchPath = onlineCatalog.path
-        await syncStoredRendCoreModels(this.options.dshHome, onlineCatalog.models)
-        this.writeLog(`[desktop] refreshed ${onlineCatalog.modelCount} models from RendCore /v1/models`)
-      } catch (error) {
-        this.writeLog(
-          `[desktop] online model discovery failed; using cached catalog when available: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        )
-      }
-    }
-    if (!onlineCatalog) {
-      if (existsSync(cachedPath)) {
-        try {
-          const cachedCatalog = await createCachedRendCorePatch(
-            this.options.dshPatchPath,
-            this.options.dshHome,
-            cachedPath,
-            capabilityModels
-          )
-          patchPath = cachedCatalog.path
-          await syncStoredRendCoreModels(this.options.dshHome, cachedCatalog.models)
-          this.writeLog('[desktop] using cached RendCore model catalog')
-        } catch (error) {
-          this.writeLog(
-            `[desktop] cached model catalog is invalid; using bundled catalog: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          )
-        }
-      } else if (capabilityModels.length > 0) {
-        const capabilityCatalog = await createCapabilityRendCorePatch(
-          this.options.dshPatchPath,
-          this.options.dshHome,
-          capabilityModels
-        )
-        patchPath = capabilityCatalog.path
-        await syncStoredRendCoreModels(this.options.dshHome, capabilityCatalog.models)
-        this.writeLog('[desktop] using RendCore capability catalog')
-      } else {
-        this.writeLog('[desktop] using bundled RendCore model catalog')
-      }
-    }
-
-    await repairInvalidRendCoreDefaultModel(this.options.dshHome)
+    const catalog = await prepareRendCoreModelCatalog(
+      this.options.dshPatchPath,
+      this.options.dshHome,
+      (line) => this.writeLog(line)
+    )
 
     const port = await reservePort()
     const url = `http://127.0.0.1:${port}`
@@ -283,22 +359,29 @@ export class HarnessRuntime {
       this.options.nodeEntryPath,
       this.options.dshEntryPath,
       port,
-      patchPath
+      catalog.path,
+      profile
     )
     const startupTimeoutMs =
       this.options.startupTimeoutMs ?? (process.platform === 'win32' ? 120_000 : 45_000)
 
     this.writeLog(`\n[desktop] starting ${new Date().toISOString()}`)
     this.writeLog(`[desktop] launch directory ${launchDirectory}`)
+    this.writeLog(`[desktop] profile ${profile}`)
     this.writeLog(`[desktop] endpoint ${url}`)
-    this.setState('starting', 'Starting RendCore Harness…')
+    this.setState('starting', 'Starting RendCore Harness...')
 
     let child: HarnessChildProcess
     try {
       child = this.options.launchProcess(
         this.options.nodeExecutablePath,
         args,
-        buildHarnessSpawnOptions(launchDirectory, this.options.dshHome, process.platform, process.env)
+        buildHarnessSpawnOptions(
+          launchDirectory,
+          this.options.dshHome,
+          process.platform,
+          resolveShellEnvironment()
+        )
       )
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -309,7 +392,27 @@ export class HarnessRuntime {
     this.child = child
 
     child.stdout.on('data', (chunk: Buffer) => this.writeChunk('stdout', chunk))
-    child.stderr.on('data', (chunk: Buffer) => this.writeChunk('stderr', chunk))
+    child.stderr.on('data', (chunk: Buffer) => {
+      this.writeChunk('stderr', chunk)
+      if (this.child !== child || this.phase !== 'starting') return
+
+      const cause = extractDshEntryFailureCause(this.logLines)
+      if (!cause) return
+
+      // The Harness entry has already rejected, so waiting for the HTTP
+      // readiness timeout can no longer succeed. Detach this launch before
+      // stopping it so the later OS exit code cannot replace the real DSH
+      // failure (a graceful SIGTERM may otherwise be reported as exit 0).
+      this.child = undefined
+      this.url = undefined
+      this.launchToken = undefined
+      this.writeLog('[desktop] Harness entry failed during startup; stopping immediately')
+      this.setState('failed', `Harness could not start.\n${cause}`)
+      void this.stopChild(child).catch((error) => {
+        const detail = error instanceof Error ? error.message : String(error)
+        this.writeLog(`[desktop] failed to stop rejected Harness launch: ${detail}`)
+      })
+    })
     child.once('spawn', () => this.writeLog('[desktop] Bundled Node.js Harness process started'))
     child.once('error', (error) => {
       this.writeLog(`[node] ${error.stack ?? error.message}`)
@@ -318,6 +421,7 @@ export class HarnessRuntime {
       this.setState('failed', `Harness could not start: ${error.message}`)
     })
     child.once('exit', (code, signal) => {
+      this.flushLogRemainders()
       const detail = signal ? `signal ${signal}` : formatExitCode(code ?? -1)
       this.writeLog(`[node] Harness process exited (${detail})`)
       if (this.child !== child) return
@@ -340,6 +444,7 @@ ${cause}`
     const ready = await waitUntilReady(
       url,
       () => this.child === child && child.exitCode === null,
+      () => this.launchToken,
       startupTimeoutMs
     ).finally(() => clearInterval(progressTimer))
 
@@ -370,6 +475,7 @@ ${cause}`
     await this.stopChild(child)
     this.closeLog()
     this.url = undefined
+    this.launchToken = undefined
     this.setState('idle', 'Harness is not running.')
   }
 
@@ -393,19 +499,35 @@ ${cause}`
   }
 
   private writeChunk(source: 'stdout' | 'stderr', chunk: Buffer): void {
-    for (const line of chunk.toString('utf8').split(/\r?\n/)) {
+    const lines = `${this.logRemainders[source]}${chunk.toString('utf8')}`.split(/\r?\n/)
+    this.logRemainders[source] = lines.pop() ?? ''
+    for (const line of lines) {
+      if (line.length === 0) continue
+      this.writeLog(`[${source}] ${line}`)
+      this.launchToken ??= extractLaunchToken(line)
+    }
+  }
+
+  private flushLogRemainders(): void {
+    for (const source of ['stdout', 'stderr'] as const) {
+      const line = this.logRemainders[source]
+      this.logRemainders[source] = ''
       if (line.length > 0) this.writeLog(`[${source}] ${line}`)
     }
   }
 
-  /** Record desktop-side diagnostics, including before a launch opens the log. */
+  /**
+   * Record a line the desktop wants in the Harness log, including before a
+   * launch: what happens to the profile between launches is exactly what
+   * someone reading the log after a failed install needs to see.
+   */
   note(line: string): void {
     if (!this.logStream) {
       try {
         mkdirSync(dirname(this.options.logPath), { recursive: true })
         this.logStream = createWriteStream(this.options.logPath, { flags: 'a' })
       } catch {
-        // Keep the line in memory when the log directory is unavailable.
+        // Keep the line in the in-memory buffer regardless.
       }
     }
     this.writeLog(line)
@@ -421,472 +543,6 @@ ${cause}`
     this.logStream?.end()
     this.logStream = undefined
   }
-}
-
-interface OnlineModelResponse {
-  data?: unknown
-}
-
-interface OnlineModelEntry {
-  id: string
-  name?: string
-  contextWindow?: number
-  maxTokens?: number
-  input?: Array<'text' | 'image'>
-  reasoningEfforts?: false | Record<string, string | null>
-}
-
-interface OnlinePatchResult {
-  path: string
-  modelCount: number
-  models: OnlineModelEntry[]
-}
-
-export function parseRendCoreModelCapabilities(payload: unknown): OnlineModelEntry[] {
-  if (!payload || typeof payload !== 'object') return []
-  const entries = (payload as Record<string, unknown>).models
-  if (!Array.isArray(entries)) return []
-
-  return entries
-    .map((entry): OnlineModelEntry | undefined => {
-      if (!entry || typeof entry !== 'object') return undefined
-      const value = entry as Record<string, unknown>
-      if (value.configured === false) return undefined
-      const id = typeof value.id === 'string' ? value.id.trim() : ''
-      if (!id || isImageGenerationOnlyModel(id, value)) return undefined
-      const displayName = typeof value.display_name === 'string' ? value.display_name.trim() : ''
-      const contextWindow = positiveInteger(value.context)
-      const maxTokens = positiveInteger(value.max_output)
-      const reasoningEfforts = reasoningEffortsFromThinking(value.thinking)
-      const known = knownModelCapabilities(id)
-      return {
-        id,
-        ...(displayName ? { name: displayName } : {}),
-        ...(contextWindow === undefined ? {} : { contextWindow }),
-        ...(maxTokens === undefined ? {} : { maxTokens }),
-        input: known?.input ?? inferModelInput(id) ?? ['text'],
-        ...(reasoningEfforts === undefined ? {} : { reasoningEfforts })
-      }
-    })
-    .filter((model): model is OnlineModelEntry => model !== undefined)
-    .filter((model, index, all) =>
-      all.findIndex((candidate) => candidate.id.toLowerCase() === model.id.toLowerCase()) === index
-    )
-}
-
-async function fetchRendCoreModelCapabilities(): Promise<OnlineModelEntry[]> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 8_000)
-  try {
-    const response = await fetch(RENDCORE_MODEL_CAPABILITIES_ENDPOINT, { signal: controller.signal })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const models = parseRendCoreModelCapabilities(await response.json())
-    if (models.length === 0) throw new Error('the endpoint returned no configured model capabilities')
-    return models
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-function indexRendCoreCapabilities(
-  models: readonly OnlineModelEntry[]
-): Map<string, OnlineModelEntry> {
-  return new Map(models.map((model) => [model.id.toLowerCase(), model]))
-}
-
-export function materializeRendCoreModel(
-  id: string,
-  value: Record<string, unknown> | undefined,
-  capability: OnlineModelEntry | undefined
-): OnlineModelEntry {
-  const known = knownModelCapabilities(id)
-  const displayName = value && typeof value.name === 'string' ? value.name.trim() : ''
-  const contextWindow = capability?.contextWindow ?? positiveInteger(
-    value?.context_window ?? value?.contextWindow ?? value?.context_length ?? value?.contextLength
-  ) ?? known?.contextWindow
-  const maxTokens = capability?.maxTokens ?? positiveInteger(
-    value?.max_tokens ?? value?.maxTokens ?? value?.max_output_tokens ?? value?.maxOutputTokens
-  ) ?? known?.maxTokens
-  const input = known?.input ?? (value ? resolveModelInput(value, id) : inferModelInput(id)) ?? ['text']
-  const reasoningEfforts = capability?.reasoningEfforts ?? (
-    value ? resolveRendCoreReasoningEfforts(id, value) : known?.reasoningEfforts
-  )
-  return {
-    id,
-    name: capability?.name || displayName || id,
-    ...(contextWindow === undefined ? {} : { contextWindow }),
-    ...(maxTokens === undefined ? {} : { maxTokens }),
-    input,
-    ...(reasoningEfforts === undefined ? {} : { reasoningEfforts })
-  }
-}
-
-function renderRendCoreModelBlock(models: readonly OnlineModelEntry[]): string {
-  return models
-    .map((model) => [
-      `          - id: ${JSON.stringify(model.id)}`,
-      `            name: ${JSON.stringify(model.name ?? model.id)}`,
-      ...(model.contextWindow === undefined ? [] : [`            contextWindow: ${model.contextWindow}`]),
-      ...(model.maxTokens === undefined ? [] : [`            maxTokens: ${model.maxTokens}`]),
-      ...(model.input === undefined ? [] : [`            input: ${JSON.stringify(model.input)}`]),
-      ...(model.reasoningEfforts === undefined
-        ? []
-        : [
-            `            reasoningEfforts: ${
-              model.reasoningEfforts === false ? 'false' : JSON.stringify(model.reasoningEfforts)
-            }`
-          ])
-    ].join('\n'))
-    .join('\n')
-}
-
-async function createOnlineRendCorePatch(
-  basePatchPath: string,
-  dshHome: string,
-  apiKey: string | undefined,
-  capabilities: readonly OnlineModelEntry[]
-): Promise<OnlinePatchResult> {
-  if (!apiKey?.trim()) {
-    throw new Error('RendCore API key is not configured; enter it in Settings > Models')
-  }
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15_000)
-  try {
-    const response = await fetch(RENDCORE_MODELS_ENDPOINT, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: controller.signal
-    })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const payload = (await response.json()) as OnlineModelResponse
-    const capabilityById = indexRendCoreCapabilities(capabilities)
-    const models = Array.isArray(payload.data)
-      ? payload.data
-          .map((entry): OnlineModelEntry | undefined => {
-            if (typeof entry === 'string') {
-              const id = entry.trim()
-              if (id.length === 0) return undefined
-              if (isImageGenerationOnlyModel(id)) return undefined
-              return materializeRendCoreModel(id, undefined, capabilityById.get(id.toLowerCase()))
-            }
-            if (!entry || typeof entry !== 'object') return undefined
-            const value = entry as Record<string, unknown>
-            const id = typeof value.id === 'string' ? value.id.trim() : ''
-            if (id.length === 0) return undefined
-            if (isImageGenerationOnlyModel(id, value)) return undefined
-            return materializeRendCoreModel(id, value, capabilityById.get(id.toLowerCase()))
-          })
-          .filter((model): model is OnlineModelEntry => model !== undefined)
-          .filter((model, index, all) =>
-            all.findIndex((candidate) => candidate.id.toLowerCase() === model.id.toLowerCase()) === index
-          )
-      : []
-    if (models.length === 0) throw new Error('the endpoint returned no model ids')
-
-    const source = await readFile(basePatchPath, 'utf8')
-    const modelBlock = renderRendCoreModelBlock(models)
-    const dynamicPatch = replaceRendCoreCompactionModel(
-      replaceRendCoreModelBlock(source, modelBlock),
-      selectRendCoreCompactionModel(models)
-    )
-    const dynamicPath = join(dshHome, 'rendcore-online.patch.yml')
-    await writeFile(dynamicPath, dynamicPatch, 'utf8')
-    return { path: dynamicPath, modelCount: models.length, models }
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-async function createCapabilityRendCorePatch(
-  basePatchPath: string,
-  dshHome: string,
-  capabilities: readonly OnlineModelEntry[]
-): Promise<OnlinePatchResult> {
-  const source = await readFile(basePatchPath, 'utf8')
-  const models = capabilities.filter((model) => !isImageGenerationOnlyModel(model.id))
-  const dynamicPatch = replaceRendCoreCompactionModel(
-    replaceRendCoreModelBlock(source, renderRendCoreModelBlock(models)),
-    selectRendCoreCompactionModel(models)
-  )
-  const dynamicPath = join(dshHome, 'rendcore-online.patch.yml')
-  await writeFile(dynamicPath, dynamicPatch, 'utf8')
-  return { path: dynamicPath, modelCount: models.length, models: [...models] }
-}
-
-/** Replace a user-layer RendCore catalog after a successful online refresh. */
-async function syncStoredRendCoreModels(dshHome: string, models: OnlineModelEntry[]): Promise<void> {
-  const settingsPath = join(dshHome, 'settings.yaml')
-  if (!existsSync(settingsPath)) return
-
-  const source = await readFile(settingsPath, 'utf8')
-  const settings = parse(source) as Record<string, unknown> | null
-  if (!settings || typeof settings !== 'object') return
-  const llm = settings['llm-pi-ai']
-  if (!llm || typeof llm !== 'object' || Array.isArray(llm)) return
-  const providers = (llm as Record<string, unknown>).providers
-  if (!providers || typeof providers !== 'object' || Array.isArray(providers)) return
-  const rendcore = (providers as Record<string, unknown>).rendcore
-  if (!rendcore || typeof rendcore !== 'object' || Array.isArray(rendcore)) return
-  const currentModels = (rendcore as Record<string, unknown>).models
-  if (!Array.isArray(currentModels)) return
-
-  const nextModels = models.map((model) => ({
-    id: model.id,
-    name: model.name ?? model.id,
-    ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
-    ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
-    ...(model.input === undefined ? {} : { input: model.input }),
-    ...(model.reasoningEfforts === undefined ? {} : { reasoningEfforts: model.reasoningEfforts })
-  }))
-  const rendcoreRecord = rendcore as Record<string, unknown>
-  rendcoreRecord.models = nextModels
-  const updated = stringify(settings)
-  if (updated !== source) await writeFile(settingsPath, updated, 'utf8')
-}
-
-async function createCachedRendCorePatch(
-  basePatchPath: string,
-  dshHome: string,
-  cachedPath: string,
-  capabilities: readonly OnlineModelEntry[]
-): Promise<OnlinePatchResult> {
-  const [baseSource, cachedSource] = await Promise.all([
-    readFile(basePatchPath, 'utf8'),
-    readFile(cachedPath, 'utf8')
-  ])
-  const modelSection = extractRendCoreModelBlock(cachedSource)
-  if (!modelSection) throw new Error('cached RendCore model block was not found')
-  const ids = [...modelSection.matchAll(/^\s+- id: (.+?)\s*$/gm)]
-    .map((match) => {
-      const raw = match[1] ?? ''
-      try {
-        const value = parse(raw) as unknown
-        return typeof value === 'string' ? value.trim() : ''
-      } catch {
-        return raw.trim().replace(/^['"]|['"]$/g, '')
-      }
-    })
-    .filter((id, index, all) => id.length > 0 && all.indexOf(id) === index)
-    .filter((id) => !isImageGenerationOnlyModel(id))
-  if (ids.length === 0) throw new Error('cached RendCore model block was empty')
-
-  const capabilityById = indexRendCoreCapabilities(capabilities)
-  const models = ids.map((id) =>
-    materializeRendCoreModel(id, undefined, capabilityById.get(id.toLowerCase()))
-  )
-  const modelBlock = renderRendCoreModelBlock(models)
-  const dynamicPatch = replaceRendCoreCompactionModel(
-    replaceRendCoreModelBlock(baseSource, modelBlock),
-    selectRendCoreCompactionModel(models)
-  )
-  await writeFile(cachedPath, dynamicPatch, 'utf8')
-  return { path: cachedPath, modelCount: models.length, models }
-}
-
-function positiveInteger(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
-}
-
-function isImageGenerationOnlyModel(id: string, value?: Record<string, unknown>): boolean {
-  const normalized = id.trim().toLowerCase()
-  if (/^(gpt-image|dall-e|imagen|flux|stable-diffusion|sdxl|midjourney)(?:[-_.]|$)/.test(normalized)) {
-    return true
-  }
-  const task = value?.task ?? value?.type ?? value?.capability
-  if (typeof task === 'string' && /image[-_ ]?generation|text[-_ ]?to[-_ ]?image/i.test(task)) return true
-  const output = value?.output ?? value?.outputs ?? value?.output_modalities ?? value?.outputModalities
-  if (Array.isArray(output)) {
-    const modalities = output.filter((item): item is string => typeof item === 'string').map((item) => item.toLowerCase())
-    if (modalities.includes('image') && !modalities.includes('text')) return true
-  }
-  return false
-}
-
-async function repairInvalidRendCoreDefaultModel(dshHome: string): Promise<void> {
-  const settingsPath = join(dshHome, 'settings.yaml')
-  if (!existsSync(settingsPath)) return
-  const source = await readFile(settingsPath, 'utf8')
-  const settings = parse(source) as Record<string, unknown> | null
-  const selected = settings?.['agent-default-model']
-  if (!selected || typeof selected !== 'object') return
-  const provider = (selected as Record<string, unknown>).provider
-  const model = (selected as Record<string, unknown>).model
-  if (provider !== 'rendcore' || typeof model !== 'string' || !isImageGenerationOnlyModel(model)) return
-  const pattern = /(^agent-default-model:\s*\r?\n(?:^[ \t]+[^\r\n]*\r?\n)*?^[ \t]+model:\s*)[^\r\n]+/m
-  if (!pattern.test(source)) return
-  await writeFile(settingsPath, source.replace(pattern, `$1${RENDCORE_SAFE_DEFAULT_MODEL}`), 'utf8')
-}
-
-async function readStoredRendCoreApiKey(dshHome: string): Promise<string | undefined> {
-  const fromEnvironment = process.env.RENDCORE_API_KEY?.trim()
-  if (fromEnvironment) return fromEnvironment
-  try {
-    const credentials = parse(await readFile(join(dshHome, '.credentials.yaml'), 'utf8')) as unknown
-    if (!credentials || typeof credentials !== 'object') return undefined
-    const root = credentials as Record<string, unknown>
-    const refs = root.refs && typeof root.refs === 'object'
-      ? root.refs as Record<string, unknown>
-      : root
-    const value = refs.RENDCORE_API_KEY
-    return typeof value === 'string' && value.trim() ? value.trim() : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function resolveModelInput(
-  value: Record<string, unknown>,
-  id: string
-): Array<'text' | 'image'> | undefined {
-  const raw = value.input ?? value.modalities ?? value.modalities_supported ?? value.supported_modalities
-  if (Array.isArray(raw)) {
-    const input = raw.filter((item): item is 'text' | 'image' => item === 'text' || item === 'image')
-    if (input.length > 0) return input.includes('text') ? input : ['text', ...input]
-  }
-  const imageFlag = value.supports_vision ?? value.supportsVision ?? value.vision ?? value.supports_image ?? value.supportsImage
-  if (imageFlag === true) return ['text', 'image']
-  if (imageFlag === false) return ['text']
-  return inferModelInput(id) ?? knownModelCapabilities(id)?.input ?? ['text']
-}
-
-function inferModelInput(id: string): Array<'text' | 'image'> | undefined {
-  const normalized = id.toLowerCase()
-  if (/(gemini|claude|vision|\bvl\b|omni|image|\b4o\b|gpt-5)/i.test(normalized)) {
-    return ['text', 'image']
-  }
-  return undefined
-}
-
-export function knownRendCoreReasoningEfforts(
-  id: string
-): Record<string, string | null> | undefined {
-  const normalized = id.trim().toLowerCase()
-  if (/^gpt-5\.6-(sol|terra|luna)$/.test(normalized)) {
-    return { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' }
-  }
-  if (normalized === 'gpt-5.5' || normalized === 'gpt-5.4') {
-    return { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' }
-  }
-  if (normalized === 'gpt-5.4-mini' || normalized.includes('gpt-5.3-codex')) {
-    return { low: 'low', medium: 'medium', high: 'high' }
-  }
-  return undefined
-}
-
-function knownModelCapabilities(id: string): OnlineModelEntry | undefined {
-  const normalized = id.toLowerCase()
-  const reasoningEfforts = knownRendCoreReasoningEfforts(normalized)
-  if (/^gpt-5\.6-(sol|terra|luna)$/.test(normalized)) {
-    return {
-      id,
-      contextWindow: 1_050_000,
-      maxTokens: 128_000,
-      input: ['text', 'image'],
-      reasoningEfforts
-    }
-  }
-  if (normalized === 'gpt-5.5' || normalized === 'gpt-5.4') {
-    return {
-      id,
-      contextWindow: 1_050_000,
-      maxTokens: 128_000,
-      input: ['text', 'image'],
-      reasoningEfforts
-    }
-  }
-  if (normalized === 'gpt-5.4-mini' || normalized.includes('gpt-5.3-codex')) {
-    return {
-      id,
-      contextWindow: 400_000,
-      maxTokens: 128_000,
-      input: ['text', 'image'],
-      reasoningEfforts
-    }
-  }
-  if (normalized.startsWith('gemini-3')) {
-    return { id, contextWindow: 1_048_576, maxTokens: 65_536, input: ['text', 'image'] }
-  }
-  if (normalized === 'claude-opus-4-6-thinking' || normalized === 'claude-sonnet-4-6') {
-    return { id, contextWindow: 1_000_000, maxTokens: 128_000, input: ['text', 'image'] }
-  }
-  if (normalized.startsWith('gpt-oss-120b')) {
-    return { id, contextWindow: 131_072, maxTokens: 131_072, input: ['text'] }
-  }
-  if (normalized.startsWith('muse-spark-1.2')) {
-    return { id, contextWindow: 1_000_000, maxTokens: 131_072, input: ['text', 'image'] }
-  }
-  if (normalized === 'deepseek-v4-pro' || normalized === 'deepseek-v4-flash') {
-    return { id, contextWindow: 1_000_000, maxTokens: 131_072, input: ['text'] }
-  }
-  if (normalized === 'deepseek-v4-flash-vision-exp') {
-    return { id, contextWindow: 1_000_000, maxTokens: 131_072, input: ['text', 'image'] }
-  }
-  if (normalized === 'glm-5.2') {
-    return { id, contextWindow: 1_000_000, maxTokens: 131_072, input: ['text'] }
-  }
-  if (normalized === 'minimax-m3') {
-    return { id, contextWindow: 1_000_000, maxTokens: 131_072, input: ['text', 'image'] }
-  }
-  if (normalized === 'qwen3.6-plus' || normalized === 'qwen3.7-plus') {
-    return { id, contextWindow: 1_000_000, maxTokens: 65_536, input: ['text', 'image'] }
-  }
-  if (normalized === 'mimo-v2.5') {
-    return { id, contextWindow: 1_000_000, maxTokens: 131_072, input: ['text', 'image'] }
-  }
-  if (normalized === 'qwen3.8-35b-a3b') {
-    return { id, contextWindow: 1_000_000, input: ['text', 'image'] }
-  }
-  if (normalized === 'hy3') {
-    return { id, contextWindow: 262_144, maxTokens: 262_144, input: ['text'] }
-  }
-  if (normalized === 'ox-alpha-free') {
-    return { id, contextWindow: 1_000_000, maxTokens: 131_072, input: ['text', 'image'] }
-  }
-  return undefined
-}
-
-function resolveReasoningEfforts(value: Record<string, unknown>): false | Record<string, string | null> | undefined {
-  if (value.reasoning === false || value.supports_reasoning === false || value.supportsReasoning === false) return false
-  const raw = value.reasoning_efforts ?? value.reasoningEfforts
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    const result: Record<string, string | null> = {}
-    for (const [key, item] of Object.entries(raw as Record<string, unknown>)) {
-      if (typeof item === 'string' || item === null) result[key] = item
-    }
-    return Object.keys(result).length > 0 ? result : undefined
-  }
-  return undefined
-}
-
-export function reasoningEffortsFromThinking(
-  value: unknown
-): false | Record<string, string | null> | undefined {
-  if (!Array.isArray(value)) return undefined
-  const efforts: Record<string, string | null> = {}
-  for (const item of value) {
-    if (typeof item !== 'string') continue
-    const wireValue = item.trim().toLowerCase()
-    if (wireValue === 'none' || wireValue === 'off') {
-      efforts.off = wireValue
-    } else if (
-      wireValue === 'minimal' ||
-      wireValue === 'low' ||
-      wireValue === 'medium' ||
-      wireValue === 'high' ||
-      wireValue === 'xhigh' ||
-      wireValue === 'max'
-    ) {
-      efforts[wireValue] = wireValue
-    }
-  }
-  if (!Object.keys(efforts).some((effort) => effort !== 'off')) return false
-  return efforts
-}
-
-export function resolveRendCoreReasoningEfforts(
-  id: string,
-  value: Record<string, unknown> = {}
-): false | Record<string, string | null> | undefined {
-  return resolveReasoningEfforts(value) ?? knownRendCoreReasoningEfforts(id)
 }
 
 function latestHarnessAttemptLogs(logLines: readonly string[]): readonly string[] {
@@ -943,6 +599,17 @@ export function extractFailureCause(logLines: readonly string[]): string | undef
   return undefined
 }
 
+export function extractDshEntryFailureCause(
+  logLines: readonly string[]
+): string | undefined {
+  for (const line of latestHarnessAttemptLogs(logLines)) {
+    if (!line.startsWith('[stderr] ')) continue
+    const match = line.slice(8).match(/DSH entry failed:\s*(.+)/)
+    if (match?.[1]) return match[1].trim()
+  }
+  return undefined
+}
+
 const CORE_BUNDLES = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dshmarket'])
 const PACKAGE_REFERENCE_PATTERN = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i
 
@@ -971,9 +638,13 @@ function extractPluginReferences(
     if (!line.startsWith('[stderr] ')) continue
     const text = line.slice(8)
 
-    const m1 = text.match(/failed to apply loader entry [^\s]+ \((@[^)]+|[^)]+)\)/i)
-    if (m1 && m1[1] && accepts(m1[1])) {
-      plugins.add(m1[1].trim())
+    // Loader failures are nested (for example the internal `cordis:include`
+    // entry wrapping a third-party bundle). Collect every entry in the chain;
+    // taking only the first one loses the actual uninstallable owner.
+    for (const match of text.matchAll(
+      /failed to (?:apply|import) loader entry [^\s]+ \((@[^)]+|[^)]+)\)/gi
+    )) {
+      if (match[1] && accepts(match[1])) plugins.add(match[1].trim())
     }
 
     const m2 = text.match(/cannot resolve profile bundle ["']([^"']+)["']/i)
@@ -984,11 +655,6 @@ function extractPluginReferences(
     const m3 = text.match(/profile bundle ["']([^"']+)["'] declares no dsh\.bundle/i)
     if (m3 && m3[1] && accepts(m3[1])) {
       plugins.add(m3[1].trim())
-    }
-
-    const m4 = text.match(/failed to import loader entry [^\s]+ \((@[^)]+|[^)]+)\)/i)
-    if (m4 && m4[1] && accepts(m4[1])) {
-      plugins.add(m4[1].trim())
     }
 
     const m5 = text.match(/plugin\(s\) failed to load:\s*([a-zA-Z0-9@/_-]+)/i)
@@ -1079,6 +745,7 @@ async function reservePort(): Promise<number> {
 async function waitUntilReady(
   url: string,
   isAlive: () => boolean,
+  launchToken: () => string | undefined,
   timeoutMs: number
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
@@ -1089,7 +756,7 @@ async function waitUntilReady(
       const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(1_000) })
       const stability = updateReadyStability(
         readySince,
-        response.status >= 200 && response.status < 500,
+        isHarnessStartupProbeHealthy(response.status, launchToken()),
         Date.now(),
         stabilityWindowMs
       )

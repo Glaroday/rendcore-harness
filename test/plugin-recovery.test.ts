@@ -1,9 +1,12 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parse, stringify } from 'yaml'
 import {
+  isDisposableModuleDirectory,
   isThirdPartyPackageName,
+  listInstalledProfilePlugins,
   profilePackageJsonPath,
   pruneMissingProfileBundles,
   resetPluginProfile,
@@ -43,6 +46,72 @@ describe('plugin-recovery', () => {
 
   afterEach(async () => {
     await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('lists only configured third-party root bundles for Safe Mode', async () => {
+    await writeFile(
+      profilePackageJsonPath(testDir),
+      JSON.stringify({
+        dependencies: {
+          '@deepseek-ai/dsh-base': '0.1.0',
+          dshmarket: '1.9.0',
+          'plugin-a': '1.0.0',
+          '@example/plugin-b': '2.0.0',
+          'transitive-only': '3.0.0'
+        },
+        dsh: {
+          profile: {
+            bundles: [
+              '@deepseek-ai/dsh-base',
+              'dshmarket',
+              'plugin-a',
+              '@example/plugin-b'
+            ]
+          }
+        }
+      })
+    )
+
+    await expect(listInstalledProfilePlugins(testDir)).resolves.toEqual([
+      'plugin-a',
+      '@example/plugin-b'
+    ])
+  })
+
+  it('returns an empty Safe Mode list when the profile is unavailable', async () => {
+    await expect(listInstalledProfilePlugins(join(testDir, 'missing'))).resolves.toEqual([])
+  })
+
+  it('lists the most recently installed profile plugin first', async () => {
+    await writeFile(
+      profilePackageJsonPath(testDir),
+      JSON.stringify({
+        dependencies: {
+          'plugin-old': '1.0.0',
+          'plugin-new': '2.0.0',
+          'plugin-without-directory': '3.0.0'
+        },
+        dsh: {
+          profile: {
+            bundles: ['plugin-old', 'plugin-new', 'plugin-without-directory']
+          }
+        }
+      })
+    )
+    const modulesDirectory = join(testDir, 'profiles', 'web', 'node_modules')
+    const oldDirectory = join(modulesDirectory, 'plugin-old')
+    const newDirectory = join(modulesDirectory, 'plugin-new')
+    await mkdir(oldDirectory, { recursive: true })
+    await mkdir(newDirectory, { recursive: true })
+    const now = Date.now()
+    await utimes(oldDirectory, new Date(now), new Date(now))
+    await utimes(newDirectory, new Date(now + 60_000), new Date(now + 60_000))
+
+    await expect(listInstalledProfilePlugins(testDir)).resolves.toEqual([
+      'plugin-new',
+      'plugin-old',
+      'plugin-without-directory'
+    ])
   })
 
   it('uninstalls specific offending plugin from package.json dependencies and bundles', async () => {
@@ -310,6 +379,53 @@ describe('plugin-recovery', () => {
       '@deepseek-ai/dsh-web-app',
       'dshmarket'
     ])
+  })
+
+  it('removes workspace packages and stale lockfile when resetting a plugin', async () => {
+    const pkgPath = profilePackageJsonPath(testDir)
+    const profileDir = join(testDir, 'profiles', 'web')
+    const workspacePkgDir = join(profileDir, 'packages', 'dsh-doudizhu')
+    const nodeModulesPkgDir = join(profileDir, 'node_modules', 'dsh-doudizhu')
+    const lockfilePath = join(profileDir, 'pnpm-lock.yaml')
+
+    await mkdir(workspacePkgDir, { recursive: true })
+    await mkdir(nodeModulesPkgDir, { recursive: true })
+    await writeFile(join(workspacePkgDir, 'package.json'), '{"name":"dsh-doudizhu"}')
+    await writeFile(join(nodeModulesPkgDir, 'package.json'), '{"name":"dsh-doudizhu"}')
+    await writeFile(lockfilePath, 'lockfileVersion: 9.0')
+    await writeFile(
+      pkgPath,
+      JSON.stringify({
+        dependencies: { 'dsh-doudizhu': 'workspace:^' },
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'dsh-doudizhu'] } }
+      })
+    )
+
+    const success = await resetPluginProfile(testDir, 'dsh-doudizhu')
+    expect(success).toBe(true)
+    expect(existsSync(workspacePkgDir)).toBe(false)
+    expect(existsSync(nodeModulesPkgDir)).toBe(false)
+    expect(existsSync(lockfilePath)).toBe(false)
+  })
+
+  it('can remove one exact scoped plugin without touching an unselected sibling', async () => {
+    const pkgPath = profilePackageJsonPath(testDir)
+    await writeFile(
+      pkgPath,
+      JSON.stringify({
+        dependencies: {
+          '@example/plugin-a': '1.0.0',
+          '@example/plugin-b': '1.0.0'
+        },
+        dsh: { profile: { bundles: ['@example/plugin-a', '@example/plugin-b'] } }
+      })
+    )
+
+    const success = await resetPluginProfile(testDir, '@example/plugin-a', false)
+    expect(success).toBe(true)
+    const manifest = JSON.parse(await readFile(pkgPath, 'utf8'))
+    expect(manifest.dependencies).toEqual({ '@example/plugin-b': '1.0.0' })
+    expect(manifest.dsh.profile.bundles).toEqual(['@example/plugin-b'])
   })
 
   it('resolves root package when a scoped sub-module fails', async () => {
@@ -697,5 +813,74 @@ describe('plugin-recovery', () => {
     const modified = await pruneMissingProfileBundles(testDir)
     expect(modified).toBe(false)
   })
+
+  it('sweeps pnpm staging and sidelined package directories before launch', () => {
+    // Windows refuses to replace a directory something still holds open, so
+    // the packaged pnpm runner moves the blocked package aside and lets pnpm
+    // install over the freed name. Nothing holds either leftover before
+    // Harness starts, which is when this sweep runs.
+    expect(isDisposableModuleDirectory('argparse_tmp_19856_4')).toBe(true)
+    expect(isDisposableModuleDirectory('argparse.dsh-old-1787317710932')).toBe(true)
+    expect(isDisposableModuleDirectory('argparse')).toBe(false)
+    expect(isDisposableModuleDirectory('js-yaml')).toBe(false)
+  })
 })
 
+
+describe('uninstall clears what the patch layer said about the plugin', () => {
+  const testDir = join(__dirname, '.temp-uninstall-patch-layer')
+  const profile = join(testDir, 'profiles', 'web')
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  it('drops the plugin’s rows and keeps the user’s own', async () => {
+    // The residue this closes: rows aimed at a plugin outlive its uninstall and
+    // keep routing services at a provider that no longer composes, which reads
+    // as a slow start rather than a fault.
+    await mkdir(join(profile, 'node_modules', 'dsh-doudizhu'), { recursive: true })
+    await writeFile(
+      join(profile, 'node_modules', 'dsh-doudizhu', 'package.json'),
+      JSON.stringify({ name: 'dsh-doudizhu', dsh: { bundle: { patch: './cordis.patch.yml' } } })
+    )
+    await writeFile(
+      join(profile, 'node_modules', 'dsh-doudizhu', 'cordis.patch.yml'),
+      '- insert:\n    - id: doudizhu\n      name: dsh-doudizhu\n'
+    )
+    await writeFile(
+      join(profile, 'package.json'),
+      JSON.stringify({
+        dependencies: { 'dsh-doudizhu': '^1.0.0' },
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'dsh-doudizhu'] } }
+      })
+    )
+    await writeFile(
+      join(profile, 'cordis.patch.yml'),
+      [
+        '- id: doudizhu',
+        '  config:',
+        '    backend: sqlite',
+        '- id: theme',
+        '  config:',
+        '    accent: violet',
+        ''
+      ].join('\n')
+    )
+
+    const success = await uninstallPluginFromProfile(testDir, 'dsh-doudizhu', async () => {
+      const manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
+      delete manifest.dependencies['dsh-doudizhu']
+      manifest.dsh.profile.bundles = ['@deepseek-ai/dsh-base']
+      await writeFile(join(profile, 'package.json'), JSON.stringify(manifest))
+      await rm(join(profile, 'node_modules', 'dsh-doudizhu'), { recursive: true, force: true })
+      return true
+    })
+
+    expect(success).toBe(true)
+    const layer = await readFile(join(profile, 'cordis.patch.yml'), 'utf8')
+    expect(layer).not.toContain('doudizhu')
+    expect(layer).not.toContain('sqlite')
+    expect(layer).toContain('accent: violet')
+  })
+})

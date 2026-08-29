@@ -5,9 +5,9 @@ import { describe, expect, it } from 'vitest'
 const projectRoot = path.resolve(import.meta.dirname, '..')
 
 const releaseAssets = [
-  'rendcore-harness-mac-arm64.dmg',
-  'rendcore-harness-mac-x64.dmg',
-  'rendcore-harness-windows-x64-setup.exe'
+  'dsh-desktop-mac-arm64.dmg',
+  'dsh-desktop-mac-x64.dmg',
+  'dsh-desktop-windows-x64-setup.exe'
 ]
 
 describe('GitHub release contract', () => {
@@ -50,6 +50,52 @@ describe('GitHub release contract', () => {
     expect(peerOnlyRuntimePackages).toEqual([])
   })
 
+  it('does not promote optional Harness providers and test support into the desktop runtime', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(projectRoot, 'package.json'), 'utf8')
+    ) as { dependencies: Record<string, string> }
+    const packageLock = JSON.parse(
+      await readFile(path.join(projectRoot, 'package-lock.json'), 'utf8')
+    ) as { packages: Record<string, unknown> }
+
+    const excludedHarnessPackages = [
+      '@deepseek-ai/cordis-plugin-logger-console',
+      '@deepseek-ai/dsh-agent-loop-testkit',
+      '@deepseek-ai/dsh-client-test-runtime',
+      '@deepseek-ai/dsh-client-web',
+      '@deepseek-ai/dsh-code-runtime-python',
+      '@deepseek-ai/dsh-e2b',
+      '@deepseek-ai/dsh-fs-e2b',
+      '@deepseek-ai/dsh-llm-mock-server',
+      '@deepseek-ai/dsh-llm-replay',
+      '@deepseek-ai/dsh-loader-smoke',
+      '@deepseek-ai/dsh-lsp',
+      '@deepseek-ai/dsh-lsp-stdio',
+      '@deepseek-ai/dsh-sdk-client',
+      '@deepseek-ai/dsh-session-persistence-sqlite',
+      '@deepseek-ai/dsh-session-snapshot',
+      '@deepseek-ai/dsh-session-title-all-prompts-llm',
+      '@deepseek-ai/dsh-storage-sqlite',
+      '@deepseek-ai/dsh-subagent-acp',
+      '@deepseek-ai/dsh-subagent-claude-code',
+      '@deepseek-ai/dsh-subagent-codex',
+      '@deepseek-ai/dsh-subagent-dsh-sdk',
+      '@deepseek-ai/dsh-subprocess-e2b',
+      '@deepseek-ai/dsh-tool-lsp',
+      '@deepseek-ai/dsh-tool-session-query',
+      '@deepseek-ai/dsh-tool-terminal',
+      '@deepseek-ai/dsh-web-search-exa',
+      '@deepseek-ai/dsh-web-search-perplexity'
+    ]
+
+    for (const packageName of excludedHarnessPackages) {
+      expect(packageJson.dependencies[packageName]).toBeUndefined()
+      expect(packageLock.packages[`node_modules/${packageName}`]).toBeUndefined()
+    }
+    expect(packageLock.packages['node_modules/@anthropic-ai/claude-agent-sdk']).toBeUndefined()
+    expect(packageLock.packages['node_modules/@openai/codex']).toBeUndefined()
+  })
+
   it('uses stable platform-specific artifact names', async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(projectRoot, 'package.json'), 'utf8')
@@ -75,6 +121,10 @@ describe('GitHub release contract', () => {
     expect(packageJson.build.extraResources).toContainEqual({
       from: 'build/dsh-loader.gif',
       to: 'dsh-loader.gif'
+    })
+    expect(packageJson.build.extraResources).toContainEqual({
+      from: 'build/dsh-loader-dark.gif',
+      to: 'dsh-loader-dark.gif'
     })
     expect(packageJson.build.extraResources).toContainEqual({
       from: 'build/dsh-desktop.patch.yml',
@@ -111,9 +161,18 @@ describe('GitHub release contract', () => {
 
     expect(main).toContain("desktopResourcePath('splash.html')")
     expect(main).toContain('await showSplash()')
+    expect(main).toContain("query: { theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light' }")
+    expect(main).toContain('nativeTheme.themeSource = harnessThemePreference()')
     expect(splash).toContain('Starting RendCore Harness')
     expect(splash).toContain('src="dsh-loader.gif"')
+    expect(splash).toContain('src="dsh-loader-dark.gif"')
+    expect(splash).toContain("document.documentElement.dataset.theme = splashTheme === 'dark'")
+    expect(splash).toContain(":root[data-theme='dark']")
+    expect(splash).toContain('brightness(2.4) saturate(0.72)')
+    expect(splash).not.toContain('filter: invert(1)')
     expect(splash).not.toContain('class="track"')
+    expect(splash).toContain('position: fixed;')
+    expect(splash).toContain('html[data-platform="windows"] main { padding-top: 70px; }')
     expect(patch).not.toMatch(/id:\s*directory-picker/)
     expect(patch).not.toContain("name: '@deepseek-ai/dsh-host-directory-picker-native'")
     expect(patch).not.toContain("name: '@deepseek-ai/dsh-client-ui-directory-picker-native'")
@@ -156,22 +215,24 @@ describe('GitHub release contract', () => {
     )
 
     expect(packageJson.dependencies['electron-updater']).toBeTruthy()
-    expect(packageJson.build.publish).toEqual([
-      { provider: 'github', owner: 'Glaroday', repo: 'rendcore-harness', releaseType: 'release' }
-    ])
+    expect(packageJson.build.publish).toEqual([{
+      provider: 'github', owner: 'Glaroday', repo: 'rendcore-harness', releaseType: 'release'
+    }])
     expect(packageJson.build.win.verifyUpdateCodeSignature).toBe(false)
     for (const asset of [
       'latest-mac-arm64.yml',
       'latest-mac-x64.yml',
       'latest-mac.yml',
       'latest.yml',
-      'rendcore-harness-mac-arm64.zip.blockmap',
-      'rendcore-harness-mac-x64.zip.blockmap',
-      'rendcore-harness-windows-x64-setup.exe.blockmap'
+      'dsh-desktop-mac-arm64.zip.blockmap',
+      'dsh-desktop-mac-x64.zip.blockmap',
+      'dsh-desktop-windows-x64-setup.exe.blockmap'
     ]) {
       expect(workflow).toContain(asset)
     }
     expect(workflow).toContain('merge-mac-update-metadata.mjs')
+    expect(workflow).toContain('Verify release assets before publication')
+    expect(workflow).toContain('verify-release-assets.mjs release-assets')
   })
 
   it('keeps builder jobs from attempting implicit tag publishing', async () => {
@@ -211,15 +272,15 @@ describe('GitHub release contract', () => {
     expect(packageJson.scripts['package:dev:win']).toContain('verify-target.mjs win32 x64')
     expect(packageJson.scripts['package:dev:win']).toContain('electron-builder.dev.cjs')
     expect(packageJson.scripts['package:dev:win']).toContain('--publish never')
-    expect(developmentConfig).toContain("appId: 'io.rendcore.harness.dev'")
-    expect(developmentConfig).toContain("productName: 'RendCore Harness Dev'")
+    expect(developmentConfig).toContain("appId: 'io.dsh.desktop.dev'")
+    expect(developmentConfig).toContain("productName: 'DSH Desktop Dev'")
     expect(developmentConfig).toContain("output: 'dist-dev'")
     expect(developmentConfig).toContain("dshDesktopChannel: 'development'")
     expect(developmentConfig).toContain(
-      "artifactName: 'rendcore-harness-dev-${os}-${arch}.${ext}'"
+      "artifactName: 'dsh-desktop-dev-${os}-${arch}.${ext}'"
     )
     expect(developmentConfig).toContain(
-      "artifactName: 'rendcore-harness-dev-windows-${arch}-setup.${ext}'"
+      "artifactName: 'dsh-desktop-dev-windows-${arch}-setup.${ext}'"
     )
     expect(main).toContain("app.setPath('userData', join(app.getPath('appData'), 'rendcore-harness-dev'))")
     expect(main).toContain("app.setPath('userData', join(app.getPath('appData'), 'rendcore-harness'))")
@@ -237,17 +298,22 @@ describe('GitHub release contract', () => {
     expect(workflow).toContain('runs-on: windows-2022')
     expect(workflow).toContain('npm run package:dev:win')
     expect(workflow).toContain('Smoke test packaged Windows Harness')
-    expect(workflow).toContain("$executable = 'dist-dev\\win-unpacked\\RendCore Harness Dev.exe'")
+    expect(workflow).toContain("$executable = 'dist-dev\\win-unpacked\\DSH Desktop Dev.exe'")
+    expect(workflow).toContain('if (-not [string]::IsNullOrEmpty($log))')
+    expect(workflow).toContain("dsh web: (http://127\\.0\\.0\\.1:\\d+/\\?token=[^\\s]+)")
+    expect(workflow).toContain('-SessionVariable harnessSession')
+    expect(workflow).toContain('-WebSession $harnessSession')
     expect(workflow).toContain('Packaged Windows Harness smoke test passed.')
-    expect(workflow).toContain("Invoke-HarnessRpc 'workspace.create'")
-    expect(workflow).toContain("Invoke-HarnessRpc 'session.create'")
+    expect(workflow).toContain('payload = @{ args = @{ request = $request } }')
+    expect(workflow).toContain("Invoke-HarnessRpc 'workspace/create'")
+    expect(workflow).toContain("Invoke-HarnessRpc 'session/create'")
     expect(workflow).toContain('Harness process exited after workspace and session creation.')
     expect(workflow).toContain('windows_prerelease_tag:')
     expect(workflow).toContain('Publish validated Windows development pre-release')
     expect(workflow).toContain('gh release create $env:PRERELEASE_TAG')
     expect(workflow).toContain('--prerelease')
     expect(workflow).toContain('name: windows-x64-dev')
-    expect(workflow).toContain('dist-dev/rendcore-harness-dev-windows-x64-setup.exe')
+    expect(workflow).toContain('dist-dev/dsh-desktop-dev-windows-x64-setup.exe')
     for (const asset of releaseAssets) expect(workflow).toContain(asset)
     expect(
       workflow.match(
@@ -278,10 +344,38 @@ describe('GitHub release contract', () => {
     expect(workflow.match(/CSC_IDENTITY_AUTO_DISCOVERY: 'false'/g)).toHaveLength(2)
     expect(workflow).not.toContain("CSC_LINK: ''")
     expect(workflow).toMatch(
-      /macos-apple-silicon:\r?\n    name: macOS Apple Silicon\r?\n    runs-on: macos-15\r?\n    steps:/
+      /macos-apple-silicon:\r?\n\s+name: macOS Apple Silicon\r?\n(?:[\s\S]*?)runs-on: macos-15\r?\n\s+steps:/
     )
     expect(workflow).toMatch(
-      /macos-intel:\r?\n    name: macOS Intel\r?\n    if: [^\r\n]+\r?\n    runs-on: macos-15-intel\r?\n    steps:/
+      /macos-intel:\r?\n\s+name: macOS Intel\r?\n(?:[\s\S]*?)runs-on: macos-15-intel\r?\n\s+steps:/
+    )
+    expect(workflow).toMatch(
+      /windows-x64:\r?\n\s+name: Windows x64\r?\n(?:[\s\S]*?)runs-on: windows-2022\r?\n\s+steps:/
+    )
+  })
+
+  it('signs Windows installers on the local UKey runner before publishing', async () => {
+    const workflow = await readFile(
+      path.join(projectRoot, '.github', 'workflows', 'release.yml'),
+      'utf8'
+    )
+
+    expect(workflow).toContain('name: windows-x64-unsigned')
+    expect(workflow).toContain('Sign Windows package locally with UKey')
+    expect(workflow).toContain('runs-on: [self-hosted, macOS, ARM64]')
+    expect(workflow).toContain('--storetype ETOKEN')
+    expect(workflow).toContain('--storepass "file:$pin_file"')
+    expect(workflow).toContain('--tsmode RFC3161')
+    expect(workflow).toContain('secrets.DESKTOP_WINDOWS_SIGNING_PIN')
+    expect(workflow).toContain(`printf '%s' "$WINDOWS_SIGNING_PIN" > "$pin_file"`)
+    expect(workflow).toContain('unset WINDOWS_SIGNING_PIN')
+    expect(workflow).not.toContain('security find-generic-password')
+    expect(workflow).not.toContain('WINDOWS_SIGNING_KEYCHAIN_SERVICE')
+    expect(workflow).toContain('finalize-windows-release.mjs')
+    expect(workflow).toContain('version="${GITHUB_REF_NAME#v}"')
+    expect(workflow).toContain('pattern: macos-*')
+    expect(workflow).toMatch(
+      /publish:[\s\S]*?needs\.sign-windows\.result == 'success'[\s\S]*?- sign-windows/
     )
   })
 
@@ -293,7 +387,7 @@ describe('GitHub release contract', () => {
     )
 
     for (const readme of readmes) {
-      expect(readme).toContain('https://github.com/Glaroday/rendcore-harness/releases')
+      expect(readme).toContain('https://www.dshdesktop.com/#download')
       expect(readme).not.toContain('| Platform | Package | Download |')
       expect(readme).not.toContain('| 平台 | 安装包 | 下载 |')
       expect(readme).not.toContain('Coming soon')

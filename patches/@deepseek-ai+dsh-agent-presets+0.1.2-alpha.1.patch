@@ -1,0 +1,57 @@
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.cordis.yml b/node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.cordis.yml
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.cordis.yml
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.cordis.yml
+@@ -130,6 +130,15 @@
+   config:
+     - id: compaction-basic
+       name: '@deepseek-ai/dsh-compaction-basic'
++      config:
++        auto: true
++        thresholdRatio: 0.7
++        retainRatio: 0.12
++        summarizationProvider: rendcore
++        summarizationModel: gpt-5.6-sol
++        maxTokens: 8192
++        compactionRetries: 2
++        maxOverflowRetries: 3
+ 
+     - id: command-compact
+       name: '@deepseek-ai/dsh-command-compact'
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml b/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml
+@@ -149,6 +149,15 @@
+   config:
+     - id: compaction-basic
+       name: '@deepseek-ai/dsh-compaction-basic'
++      config:
++        auto: true
++        thresholdRatio: 0.7
++        retainRatio: 0.12
++        summarizationProvider: rendcore
++        summarizationModel: gpt-5.6-sol
++        maxTokens: 8192
++        compactionRetries: 2
++        maxOverflowRetries: 3
+ 
+     - id: command-compact
+       name: '@deepseek-ai/dsh-command-compact'
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml b/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml
+@@ -142,6 +142,15 @@
+   config:
+     - id: compaction-basic
+       name: '@deepseek-ai/dsh-compaction-basic'
++      config:
++        auto: true
++        thresholdRatio: 0.7
++        retainRatio: 0.12
++        summarizationProvider: rendcore
++        summarizationModel: gpt-5.6-sol
++        maxTokens: 8192
++        compactionRetries: 2
++        maxOverflowRetries: 3
+ 
+     - id: command-compact
+       name: '@deepseek-ai/dsh-command-compact'

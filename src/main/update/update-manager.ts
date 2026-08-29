@@ -1,4 +1,6 @@
 import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
+import electronUpdater from 'electron-updater'
+import type { UpdateStatus } from '../../shared/contracts'
 import {
   DEFAULT_UPDATE_FEED_CONFIG,
   readUpdateFeedConfig,
@@ -7,8 +9,6 @@ import {
   type UpdateFeedConfig,
   type UpdateFeedSettings
 } from './update-feed'
-import electronUpdater from 'electron-updater'
-import type { UpdateStatus } from '../../shared/contracts'
 import {
   AUTO_INSTALL_ON_APP_QUIT,
   shouldCheckAfterResume,
@@ -22,6 +22,12 @@ import {
   reduceUpdateStatus,
   type UpdateStateEvent
 } from './update-state'
+import {
+  readSkippedVersion,
+  shouldOfferUpdate,
+  skippedVersionPath,
+  writeSkippedVersion
+} from './skipped-version'
 
 const { autoUpdater } = electronUpdater
 const TRANSIENT_STATUS_MS = 8_000
@@ -34,8 +40,12 @@ let resetTimer: NodeJS.Timeout | undefined
 let checkPromise: Promise<unknown> | undefined
 let lastCheckedAt = 0
 let installing = false
+let downloading = false
 let started = false
 let handlersRegistered = false
+let skippedVersion: string | undefined
+let skipLoaded = false
+let manualCheck = false
 let updateFeedConfig: UpdateFeedConfig = { feedUrls: [], fallbackToGitHub: true }
 let activeMirrorIndex = -1
 
@@ -46,37 +56,49 @@ export function getUpdateStatus(): UpdateStatus {
 export function registerUpdateHandlers(): void {
   if (handlersRegistered) return
   handlersRegistered = true
-  // Load settings before the Harness window is shown so the panel is useful
-  // in development builds too; the packaged updater refreshes this again.
   updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:install', () => installDownloadedUpdate())
-  ipcMain.handle('updates:config:get', () => ({
-    mirrors: updateFeedConfig.feedUrls,
-    fallbackToGitHub: updateFeedConfig.fallbackToGitHub,
-    defaults: DEFAULT_UPDATE_FEED_CONFIG.feedUrls
-  }))
+  ipcMain.handle('updates:skip', (_event, version: unknown) => skipUpdate(version))
+  ipcMain.handle('updates:download', () => downloadAvailableUpdate())
+  ipcMain.handle('updates:config:get', () => updateFeedSettings())
   ipcMain.handle('updates:config:set', async (_event, value: unknown) => {
-    const settings = parseUpdateFeedSettings(value)
-    updateFeedConfig = await writeUpdateFeedConfig(app.getPath('userData'), settings)
-    activeMirrorIndex = -1
+    updateFeedConfig = await writeUpdateFeedConfig(app.getPath('userData'), parseFeedSettings(value))
     configureFirstFeed()
-    return {
-      mirrors: updateFeedConfig.feedUrls,
-      fallbackToGitHub: updateFeedConfig.fallbackToGitHub,
-      defaults: DEFAULT_UPDATE_FEED_CONFIG.feedUrls
-    }
+    return updateFeedSettings()
   })
   ipcMain.handle('updates:config:reset', async () => {
     updateFeedConfig = await resetUpdateFeedConfig(app.getPath('userData'))
-    activeMirrorIndex = -1
     configureFirstFeed()
-    return {
-      mirrors: updateFeedConfig.feedUrls,
-      fallbackToGitHub: updateFeedConfig.fallbackToGitHub,
-      defaults: DEFAULT_UPDATE_FEED_CONFIG.feedUrls
-    }
+    return updateFeedSettings()
   })
+}
+
+function skipFile(): string {
+  return skippedVersionPath(app.getPath('userData'))
+}
+
+function currentSkippedVersion(): string | undefined {
+  if (!skipLoaded) {
+    skippedVersion = readSkippedVersion(skipFile())
+    skipLoaded = true
+  }
+  return skippedVersion
+}
+
+/**
+ * Stop offering one version. The banner goes away for good rather than until
+ * the next launch, and a later release is a new question that still gets
+ * asked. A manual check overrides this, which is how the user takes back a
+ * version they skipped.
+ */
+export function skipUpdate(version: unknown): UpdateStatus {
+  if (typeof version !== 'string' || !version) return getUpdateStatus()
+  skippedVersion = version
+  skipLoaded = true
+  writeSkippedVersion(skipFile(), version)
+  transition({ type: 'reset' })
+  return getUpdateStatus()
 }
 
 export function startUpdateManager(options: { prepareToInstall: () => Promise<void> }): void {
@@ -119,15 +141,37 @@ export async function checkForUpdates(manual = false): Promise<UpdateStatus> {
   }
 
   transition({ type: 'check', manual })
+  manualCheck = manual
   lastCheckedAt = Date.now()
+  checkPromise = checkUsingConfiguredFeeds()
 
   try {
-    await checkUsingConfiguredFeeds()
+    await checkPromise
   } catch (error) {
     transition({ type: 'error', message: errorMessage(error) })
     if (manual) scheduleReset()
   } finally {
     checkPromise = undefined
+  }
+
+  return getUpdateStatus()
+}
+
+/**
+ * Start the download the user just accepted. Consent and download are one
+ * action — an update sits at `available` until it is taken.
+ */
+export async function downloadAvailableUpdate(): Promise<UpdateStatus> {
+  if (status.phase !== 'available' || downloading) return getUpdateStatus()
+  downloading = true
+
+  try {
+    await autoUpdater.downloadUpdate()
+  } catch (error) {
+    transition({ type: 'error', message: errorMessage(error) })
+    if (status.manual) scheduleReset()
+  } finally {
+    downloading = false
   }
 
   return getUpdateStatus()
@@ -159,10 +203,10 @@ export function stopUpdateManager(): void {
 
 function configureUpdater(): void {
   updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
-  activeMirrorIndex = -1
   configureFirstFeed()
-
-  autoUpdater.autoDownload = true
+  // The download is ours to start: an update the user skipped should not be
+  // fetched at all, and update-available is the only place that is known.
+  autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = AUTO_INSTALL_ON_APP_QUIT
   autoUpdater.allowPrerelease = false
   autoUpdater.logger = {
@@ -175,9 +219,16 @@ function configureUpdater(): void {
   autoUpdater.on('checking-for-update', () =>
     transition({ type: 'check', manual: status.manual })
   )
-  autoUpdater.on('update-available', (info) =>
+  autoUpdater.on('update-available', (info) => {
+    if (!shouldOfferUpdate(info.version, currentSkippedVersion(), manualCheck)) {
+      console.info('[updater] skipping', info.version, 'at the user’s request')
+      transition({ type: 'reset' })
+      return
+    }
+    // Offered, not fetched: nothing leaves the network until the user accepts
+    // the update, which is the same click that starts the download.
     transition({ type: 'available', version: info.version })
-  )
+  })
   autoUpdater.on('download-progress', (progress) =>
     transition({ type: 'progress', percent: progress.percent })
   )
@@ -194,20 +245,15 @@ function configureUpdater(): void {
   })
 }
 
-function configureFirstFeed(): void {
-  const firstFeed = updateFeedConfig.feedUrls[0]
-  if (firstFeed) {
-    configureMirrorFeed(firstFeed)
-    activeMirrorIndex = 0
-    console.info('[updater] using configured update mirror', updateFeedConfig.feedUrls[0])
-  } else {
-    // An empty list means direct GitHub in the settings UI, regardless of the
-    // fallback toggle; there is otherwise no feed for electron-updater to use.
-    configureGitHubFeed()
+function updateFeedSettings(): UpdateFeedSettings & { defaults: string[] } {
+  return {
+    mirrors: [...updateFeedConfig.feedUrls],
+    fallbackToGitHub: updateFeedConfig.fallbackToGitHub,
+    defaults: [...DEFAULT_UPDATE_FEED_CONFIG.feedUrls]
   }
 }
 
-function parseUpdateFeedSettings(value: unknown): UpdateFeedSettings {
+function parseFeedSettings(value: unknown): UpdateFeedSettings {
   if (!value || typeof value !== 'object') throw new Error('Invalid update mirror settings.')
   const raw = value as { mirrors?: unknown; fallbackToGitHub?: unknown }
   if (!Array.isArray(raw.mirrors) || raw.mirrors.some((mirror) => typeof mirror !== 'string')) {
@@ -219,51 +265,37 @@ function parseUpdateFeedSettings(value: unknown): UpdateFeedSettings {
   }
 }
 
-async function checkUsingConfiguredFeeds(): Promise<void> {
-  checkPromise = autoUpdater.checkForUpdates()
+function configureFirstFeed(): void {
+  activeMirrorIndex = updateFeedConfig.feedUrls.length > 0 ? 0 : -1
+  const first = updateFeedConfig.feedUrls[0]
+  if (first) autoUpdater.setFeedURL({ provider: 'generic', url: first })
+  else configureGitHubFeed()
+}
+
+async function checkUsingConfiguredFeeds(): Promise<unknown> {
   try {
-    await checkPromise
-    return
+    return await autoUpdater.checkForUpdates()
   } catch (firstError) {
     let lastError: unknown = firstError
-    for (let nextMirrorIndex = activeMirrorIndex + 1; nextMirrorIndex < updateFeedConfig.feedUrls.length; nextMirrorIndex += 1) {
-      const nextFeed = updateFeedConfig.feedUrls[nextMirrorIndex]
-      if (!nextFeed) continue
-      configureMirrorFeed(nextFeed)
-      activeMirrorIndex = nextMirrorIndex
-      console.warn('[updater] update mirror failed; trying next mirror', nextFeed)
-      checkPromise = autoUpdater.checkForUpdates()
-      try {
-        await checkPromise
-        return
-      } catch (nextError) {
-        lastError = nextError
-      }
+    for (let index = activeMirrorIndex + 1; index < updateFeedConfig.feedUrls.length; index += 1) {
+      const feed = updateFeedConfig.feedUrls[index]
+      if (!feed) continue
+      autoUpdater.setFeedURL({ provider: 'generic', url: feed })
+      activeMirrorIndex = index
+      try { return await autoUpdater.checkForUpdates() } catch (error) { lastError = error }
     }
-
-    if (activeMirrorIndex >= 0 && updateFeedConfig.fallbackToGitHub) {
+    if (updateFeedConfig.fallbackToGitHub && activeMirrorIndex >= 0) {
       configureGitHubFeed()
       activeMirrorIndex = -1
-      console.warn('[updater] update mirrors failed; falling back to GitHub Releases')
-      checkPromise = autoUpdater.checkForUpdates()
-      await checkPromise
-      return
+      return autoUpdater.checkForUpdates()
     }
-
     throw lastError
   }
 }
 
-function configureMirrorFeed(feedUrl: string): void {
-  autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl })
-}
-
 function configureGitHubFeed(): void {
   autoUpdater.setFeedURL({
-    provider: 'github',
-    owner: 'Glaroday',
-    repo: 'rendcore-harness',
-    releaseType: 'release'
+    provider: 'github', owner: 'Glaroday', repo: 'rendcore-harness', releaseType: 'release'
   })
 }
 
@@ -293,8 +325,6 @@ function checkAfterResume(): void {
 }
 
 function supportsUpdates(): boolean {
-  // electron-builder supplies the GitHub Releases feed for packaged builds.
-  // Development builds must never query or install production updates.
   return supportsAutoUpdates(app.isPackaged, process.platform)
 }
 

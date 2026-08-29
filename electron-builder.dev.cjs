@@ -2,21 +2,21 @@ const packageJson = require('./package.json')
 
 module.exports = {
   ...packageJson.build,
-  appId: 'io.rendcore.harness.dev',
-  productName: 'RendCore Harness Dev',
+  appId: 'io.dsh.desktop.dev',
+  productName: 'DSH Desktop Dev',
   directories: {
     ...packageJson.build.directories,
     output: 'dist-dev'
   },
   extraMetadata: {
-    name: 'rendcore-harness-dev',
-    productName: 'RendCore Harness Dev',
+    name: 'dsh-desktop-dev',
+    productName: 'DSH Desktop Dev',
     dshDesktopChannel: 'development'
   },
-  artifactName: 'rendcore-harness-dev-${os}-${arch}.${ext}',
+  artifactName: 'dsh-desktop-dev-${os}-${arch}.${ext}',
   nsis: {
     ...packageJson.build.nsis,
-    artifactName: 'rendcore-harness-dev-windows-${arch}-setup.${ext}'
+    artifactName: 'dsh-desktop-dev-windows-${arch}-setup.${ext}'
   },
   publish: null
 }
