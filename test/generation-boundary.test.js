@@ -128,6 +128,38 @@ describe('the market install boundary', () => {
     expect(desired[0]).toMatch(/^widget\+2\.0\.0\+/u)
   })
 
+  it('migrates legacy dsh-pet display config before projecting the hot install', async () => {
+    const home = await freshHome()
+    await mkdir(join(home, 'dsh-pet'), { recursive: true })
+    const configPath = join(home, 'dsh-pet', 'main-config.json')
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        pets: [
+          {
+            id: 'main',
+            size: 462,
+            balanceEnabled: true,
+            position: { corner: 'top-right', marginX: 24, marginY: 100 }
+          }
+        ]
+      })
+    )
+    const svc = service(home, stubGenerationInstall('dsh-pet', '0.2.2'))
+
+    const result = await drainHandle(
+      svc.runExternalMarketPluginInstall(
+        ['add', 'dsh-pet@0.2.2'],
+        join(home, 'profiles', 'web')
+      )
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('migrated legacy dsh-pet config')
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    expect(config.pets[0].display).toBe('both')
+  })
+
   it('stages an exact copy of an installed external source and records its provenance', async () => {
     const home = await freshHome()
     const source = join(home, 'legacy-source-plugin')

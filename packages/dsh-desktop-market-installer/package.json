@@ -20,6 +20,10 @@
       "types": "./generations/projection.d.ts",
       "default": "./generations/projection.mjs"
     },
+    "./plugin-config-migrations": {
+      "types": "./plugin-config-migrations.d.ts",
+      "default": "./plugin-config-migrations.mjs"
+    },
     "./package.json": "./package.json"
   },
   "dsh": {

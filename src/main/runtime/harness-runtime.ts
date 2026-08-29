@@ -4,6 +4,7 @@ import { createWriteStream, existsSync, mkdirSync, type WriteStream } from 'node
 import { mkdir } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { dirname, join } from 'node:path'
+import { migrateDshPetDisplayConfig } from 'dsh-desktop-market-installer/plugin-config-migrations'
 import type { RuntimePhase, RuntimeSnapshot } from '../../shared/contracts'
 import { migrateLegacyPresetSetting } from '../state/preset-migration'
 import { prepareRendCoreModelCatalog } from './rendcore-model-catalog'
@@ -349,6 +350,7 @@ export class HarnessRuntime {
     this.logStream ??= createWriteStream(this.options.logPath, { flags: 'a' })
 
     await migrateLegacyPresetSetting(this.options.dshHome, (line) => this.writeLog(line))
+    await migrateDshPetDisplayConfig(this.options.dshHome, (line) => this.writeLog(`[desktop] ${line}`))
 
     const catalog = await prepareRendCoreModelCatalog(
       this.options.dshPatchPath,

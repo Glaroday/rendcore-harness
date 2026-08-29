@@ -16,6 +16,7 @@ import {
   withRegistryLock,
   writeDesired
 } from './generations/registry.mjs'
+import { migrateInstalledPluginConfig } from './plugin-config-migrations.mjs'
 import { SIDELINE_MARKER } from './pnpm-runner.mjs'
 import { removeTree } from './remove-tree.mjs'
 
@@ -453,6 +454,8 @@ export function createDesktopPnpmService(options) {
           runInstall: options.runGenerationInstall
         })
         if (!install.ok) return { exitCode: 1, message: install.detail ?? 'generation install failed' }
+
+        await migrateInstalledPluginConfig(home, install.generation.pluginName, write)
 
         // Replace any earlier generation of the same plugin, keep the rest.
         const [desired, generations] = await Promise.all([readDesired(home), listGenerations(home)])
