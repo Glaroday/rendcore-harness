@@ -1,0 +1,78 @@
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.cordis.yml b/node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.cordis.yml
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.cordis.yml
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.cordis.yml
+@@ -132,5 +132,14 @@
+     - id: compaction-basic
+       name: '@deepseek-ai/dsh-compaction-basic'
++      config:
++        auto: true
++        thresholdRatio: 0.7
++        retainRatio: 0.12
++        summarizationProvider: rendcore
++        summarizationModel: gpt-5.6-sol
++        maxTokens: 8192
++        compactionRetries: 2
++        maxOverflowRetries: 3
+ 
+     - id: command-compact
+       name: '@deepseek-ai/dsh-command-compact'
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/lib/index.js b/node_modules/@deepseek-ai/dsh-agent-presets/lib/index.js
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/lib/index.js
+@@ -1436,6 +1436,7 @@
+ 		*/
+ 		async resolve(id) {
+-			const wanted = id ?? this.defaultId;
++			const requested = id ?? this.defaultId;
++			const wanted = requested === "code" ? "ptc" : requested;
+ 			const presets = await this.list();
+ 			const found = presets.find((preset) => preset.id === wanted);
+ 			if (found === void 0) {
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/lib/invariant.js b/node_modules/@deepseek-ai/dsh-agent-presets/lib/invariant.js
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/lib/invariant.js
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/lib/invariant.js
+@@ -1413,6 +1413,7 @@
+ 		*/
+ 		async resolve(id) {
+-			const wanted = id ?? this.defaultId;
++			const requested = id ?? this.defaultId;
++			const wanted = requested === "code" ? "ptc" : requested;
+ 			const presets = await this.list();
+ 			const found = presets.find((preset) => preset.id === wanted);
+ 			if (found === void 0) {
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml b/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/presets/ptc/agent.cordis.yml
+@@ -151,5 +151,14 @@
+     - id: compaction-basic
+       name: '@deepseek-ai/dsh-compaction-basic'
++      config:
++        auto: true
++        thresholdRatio: 0.7
++        retainRatio: 0.12
++        summarizationProvider: rendcore
++        summarizationModel: gpt-5.6-sol
++        maxTokens: 8192
++        compactionRetries: 2
++        maxOverflowRetries: 3
+ 
+     - id: command-compact
+       name: '@deepseek-ai/dsh-command-compact'
+diff --git a/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml b/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml
+--- a/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml
++++ b/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml
+@@ -144,5 +144,14 @@
+     - id: compaction-basic
+       name: '@deepseek-ai/dsh-compaction-basic'
++      config:
++        auto: true
++        thresholdRatio: 0.7
++        retainRatio: 0.12
++        summarizationProvider: rendcore
++        summarizationModel: gpt-5.6-sol
++        maxTokens: 8192
++        compactionRetries: 2
++        maxOverflowRetries: 3
+ 
+     - id: command-compact
+       name: '@deepseek-ai/dsh-command-compact'

@@ -1,0 +1,138 @@
+# Keep the stock directory-picker (auto) row active: the native backend
+# serves ctx.directoryPicker, so host-side consumers (host.pickDirectory,
+# plugins reading the seam) work unmodified. The client surface keeps its
+# Electron-dialog bridge via the client-ui patch in patches/.
+
+# Disable the stock single-slot occupant before mounting Desktop's equivalent;
+# two occupants cannot share either brand seat. The Desktop plugin preserves
+# the stock conversation mark. The phone remains in the settings row because
+# the public footer-action slot is a separate row. Window chrome geometry
+# remains a native-shell concern.
+- id: ui-brand-official
+  disabled: true
+
+- insert:
+    - id: dsh-desktop-client-ui
+      name: dsh-desktop-client-ui
+
+    # DSH Desktop owns the fixed-target dsh-market installer and its lightweight
+    # settings entry. After dshmarket is installed and Harness restarts, the
+    # community plugin replaces the placeholder with its complete market UI.
+    - id: dsh-desktop-market-installer
+      name: dsh-desktop-market-installer
+
+    # DSH PPT owns one direct PPTD workflow and one standard Composer client.
+    # The package contains no Tencent editor runtime or SlideP route.
+    - id: dsh-ppt-composer
+      name: 'dsh-ppt-composer'
+      config:
+        root: !!js dshHomePath('kimi-ppt')
+
+# dsh-market normally offers to restart its own Node process after mutations.
+# The desktop shell has the real lifecycle authority, so keep that behavior off
+# whenever the optional plugin is present in the composed profile.
+- id: dsh-market
+  inject: [desktopProfiles]
+  config:
+    profile: web
+    allowRestart: false
+
+# Harness creates the full Cordis HMR service after boot when no `hmr` service
+# exists, and that service throws without Node's internal module loader —
+# which a packaged Electron app cannot provide, so every signed macOS launch
+# failed profile boot at that step. This row supplies the config-watching
+# subset `watchUserPatches` actually needs; where the internals are reachable
+# it stands aside and the real service loads unchanged.
+- insert:
+    - id: dsh-desktop-hmr-fallback
+      name: dsh-desktop-hmr-fallback
+
+# Preset package export and import. These two routes lived in a patch on
+# dsh-host-apiproxy until 0.1.2-alpha.1 deleted that package; upstream ships no
+# preset transfer of its own, so the capability moved into a desktop plugin
+# that registers on the Connection fetch-route seam instead.
+- insert:
+    - id: dsh-desktop-preset-transfer
+      name: dsh-desktop-preset-transfer
+
+# RendCore is an OpenAI-compatible gateway. Credentials remain user-owned and
+# writable from Settings; no API key is embedded in the application.
+- id: llm-pi-ai
+  config:
+    providers:
+      rendcore:
+        displayName: RendCore
+        apiKeyEnv: RENDCORE_API_KEY
+        api: openai-completions
+        baseURL: http://47.103.24.134:18036/v1
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: true
+          supportsUsageInStreaming: true
+          maxTokensField: max_tokens
+        defaultContextWindow: 1050000
+        defaultMaxTokens: 128000
+        defaultInput: [text]
+        models:
+          - id: gpt-5.6-sol
+            name: GPT-5.6 Sol
+            contextWindow: 1050000
+            maxTokens: 128000
+            input: [text, image]
+            reasoningEfforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
+          - id: gemini-3.7-flash-high
+            name: Gemini 3.7 Flash High
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: claude-opus-4-6-thinking
+            name: Claude Opus 4.6 Thinking
+            contextWindow: 1000000
+            maxTokens: 128000
+            input: [text, image]
+          - id: claude-sonnet-4-6
+            name: Claude Sonnet 4.6
+            contextWindow: 1000000
+            maxTokens: 128000
+            input: [text, image]
+          - id: gpt-oss-120b-medium
+            name: GPT-OSS 120B Medium
+            contextWindow: 131072
+            maxTokens: 131072
+            input: [text]
+          - id: Qwen3.8-35B-A3B
+            name: Qwen3.8-35B-A3B
+            contextWindow: 1000000
+            input: [text, image]
+          - id: ox-alpha-free
+            name: ox-alpha-free
+            contextWindow: 1000000
+            maxTokens: 128000
+            input: [text, image]
+
+- id: compaction-basic
+  config:
+    auto: true
+    thresholdRatio: 0.7
+    retainRatio: 0.12
+    summarizationProvider: rendcore
+    summarizationModel: gpt-5.6-sol
+    maxTokens: 8192
+    compactionRetries: 2
+    maxOverflowRetries: 3
+
+- insert:
+    - id: model-fix
+      name: dsh-model-fix
+      config:
+        modelPattern: '^muse-spark'
+        providers: []
+
+- id: web
+  config:
+    searchProvider: modsearch
+
+- id: agent-default-model
+  config:
+    provider: rendcore
+    model: gpt-5.6-sol
