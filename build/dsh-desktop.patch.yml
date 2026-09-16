@@ -64,7 +64,7 @@
         displayName: RendCore
         apiKeyEnv: RENDCORE_API_KEY
         api: openai-completions
-        baseURL: http://47.103.24.134:18036/v1
+        baseURL: http://43.248.102.104:18704/v1
         compat:
           supportsDeveloperRole: false
           supportsReasoningEffort: true
