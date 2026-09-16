@@ -12,6 +12,207 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  A warm magazine spread aesthetic — the kind of layout a small print quarterly with field-notes pretensions would commission. Cormorant Garamond carries every headline and ornamental moment with mixed roman and italic; Work Sans recedes into supporting body. The palette is cream paper with a quartet of pastel candy accents (dusty pink, chartreuse lemon, soft peach blush, sage green, lilac) used as colored card backgrounds. Generous rounded cards (24–36px radius) float on translucent white over the cream field. The mood is editorial calm with a sprinkling of riso-print color — closer to a literary research notebook than a corporate deck.
 
+colors:
+  paper: "#F2EEDF"
+  paper-2: "#ECE6D2"
+  ink: "#2A241B"
+  ink-soft: "#5C5345"
+  pink: "#E1A4C2"
+  lemon: "#D6DD63"
+  blush: "#E8C9B6"
+  sage: "#B7C7A8"
+  lilac: "#C9BEDC"
+  card-fill: "rgba(255,255,255,0.55)"
+  rule-soft: "rgba(42,36,27,0.18)"
+  rule-medium: "rgba(42,36,27,0.35)"
+
+color-aliases:
+  background: paper
+  text-primary: ink
+  text-secondary: ink-soft
+
+typography:
+  display:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 232px
+    fontWeight: 500
+    lineHeight: 0.92
+    letterSpacing: -0.02em
+  title:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 188px
+    fontWeight: 500
+    lineHeight: 0.95
+    letterSpacing: -0.015em
+  closer:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 168px
+    fontWeight: 500
+    lineHeight: 0.95
+    letterSpacing: -0.015em
+  numeral-hero:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 320px
+    fontWeight: 500
+    lineHeight: 0.9
+    letterSpacing: -0.02em
+  numeral-lg:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 200px
+    fontWeight: 500
+    lineHeight: 0.9
+    letterSpacing: -0.02em
+  panel-headline:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 124px
+    fontWeight: 500
+    lineHeight: 0.98
+    letterSpacing: -0.01em
+  section-headline:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 96px
+    fontWeight: 500
+    lineHeight: 0.98
+    letterSpacing: -0.01em
+  page-headline:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 88px
+    fontWeight: 500
+    lineHeight: 1
+    letterSpacing: -0.01em
+  quote-text:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 88px
+    fontWeight: 500
+    lineHeight: 1.05
+    letterSpacing: -0.01em
+  quote-mark:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 220px
+    fontWeight: 500
+    lineHeight: 0.7
+    fontStyle: italic
+  card-headline:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 72px
+    fontWeight: 500
+    lineHeight: 1
+    letterSpacing: -0.01em
+  drop-cap:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 132px
+    fontWeight: 500
+    lineHeight: 0.85
+  opener:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 56px
+    fontWeight: 500
+    fontStyle: italic
+    lineHeight: 1.1
+  numeral-step:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 92px
+    fontWeight: 500
+    fontStyle: italic
+    lineHeight: 0.9
+  numeral-card:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 64px
+    fontWeight: 500
+    fontStyle: italic
+    lineHeight: 1
+  subhead-lg:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 56px
+    fontWeight: 500
+    fontStyle: italic
+    lineHeight: 1.1
+  subhead-md:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 44px
+    fontWeight: 500
+    lineHeight: 1.05
+  subhead-sm:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 38px
+    fontWeight: 500
+    lineHeight: 1.05
+  kicker:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 38px
+    fontWeight: 400
+    fontStyle: italic
+    lineHeight: 1.2
+  marker:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 32px
+    fontWeight: 400
+    fontStyle: italic
+    lineHeight: 1.3
+  card-sub:
+    fontFamily: "Work Sans, sans-serif"
+    fontSize: 32px
+    fontWeight: 500
+    lineHeight: 1.1
+  eyebrow:
+    fontFamily: "Work Sans, sans-serif"
+    fontSize: 28px
+    fontWeight: 400
+    letterSpacing: -0.005em
+  page-marker:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 26px
+    fontWeight: 400
+    fontStyle: italic
+  footer:
+    fontFamily: "Cormorant Garamond, Garamond, serif"
+    fontSize: 26px
+    fontWeight: 400
+    fontStyle: italic
+  body:
+    fontFamily: "Work Sans, sans-serif"
+    fontSize: 26px
+    fontWeight: 400
+    lineHeight: 1.5
+  body-md:
+    fontFamily: "Work Sans, sans-serif"
+    fontSize: 24px
+    fontWeight: 400
+    lineHeight: 1.5
+  attr:
+    fontFamily: "Work Sans, sans-serif"
+    fontSize: 24px
+    fontWeight: 500
+    lineHeight: 1.3
+  swatch-label:
+    fontFamily: "Work Sans, sans-serif"
+    fontSize: 11px
+    fontWeight: 400
+    letterSpacing: 0.06em
+    textTransform: uppercase
+
+spacing:
+  pad-outer: 80px
+  pad-top: 60px
+  pad-bottom: 50px
+  card-pad-lg: "64px 48px"
+  card-pad-md: "48px 52px"
+  card-pad-sm: "28px 30px"
+  gap-cards: 28px
+  gap-cards-lg: 36px
+  gap-stack: 36px
+
+canvas:
+  width: 1920px
+  height: 1080px
+
+components:
+  card-soft:
+    background: "{colors.card-fill}"
+    borderRadius: "24px to 36px"
+    padding: "{spacing.card-pad-sm} to {spacing.card-pad-lg}"
+    
+
 1. Cover (cover)
 2. Agenda (agenda)
 3. Insights (insights)

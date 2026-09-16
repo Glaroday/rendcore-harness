@@ -12,6 +12,152 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  A serif-led editorial presentation system in the register of a literary quarterly or art-book monograph. Display type runs in Source Serif 4 at weight 500 with optical-size axis engaged, scaling up to 220px for cover and stat moments. The palette pairs a deep forest green (#2e4a2a) with a dusty rose pink (#e89cb1) over an oat-cream paper ground (#efe7d4), with JetBrains Mono as the editorial chrome (labels, captions, axis ticks). The aesthetic is closer to a Penguin classic, Apartamento spread, or quiet annual report than a tech keynote — confident, paper-feeling, and committed to a small color vocabulary.
 
+colors:
+  green: "#2e4a2a"
+  green-deep: "#243a21"
+  green-lite: "#3a5a36"
+  pink: "#e89cb1"
+  pink-deep: "#d27e96"
+  cream: "#efe7d4"
+  cream-2: "#e6dcc4"
+  ink: "#1a1a17"
+
+typography:
+  display-hero:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 220
+    fontWeight: 500
+    lineHeight: 0.92
+    letterSpacing: -0.02em
+  display:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 140
+    fontWeight: 500
+    lineHeight: 1.02
+    letterSpacing: -0.02em
+  headline-xl:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 96
+    fontWeight: 500
+    lineHeight: 0.96
+    letterSpacing: -0.02em
+  headline:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 84
+    fontWeight: 500
+    lineHeight: 1.0
+    letterSpacing: -0.02em
+  headline-sm:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 80
+    fontWeight: 500
+    lineHeight: 0.98
+    letterSpacing: -0.02em
+  title-card-lg:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 84
+    fontWeight: 500
+    lineHeight: 0.98
+    letterSpacing: -0.01em
+  title-card:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 68
+    fontWeight: 500
+    lineHeight: 0.96
+    letterSpacing: -0.01em
+  title-card-sm:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 56
+    fontWeight: 500
+    lineHeight: 0.98
+    letterSpacing: -0.01em
+  figure-caption-serif:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 56
+    fontWeight: 500
+    lineHeight: 1.05
+  name:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 44
+    fontWeight: 600
+    lineHeight: 1.0
+  meta-value:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 32
+    fontWeight: 500
+  body-lg:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 32
+    fontWeight: 400
+    lineHeight: 1.32
+  body:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 30
+    fontWeight: 400
+    lineHeight: 1.38
+  body-card:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 26
+    fontWeight: 400
+    lineHeight: 1.34
+  label:
+    fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace"
+    fontSize: 26
+    fontWeight: 500
+    letterSpacing: 0.18em
+    textTransform: uppercase
+  label-tight:
+    fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace"
+    fontSize: 26
+    fontWeight: 500
+    letterSpacing: 0.14em
+    textTransform: uppercase
+  caption-mono:
+    fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace"
+    fontSize: 24
+    fontWeight: 500
+    letterSpacing: 0.14em
+    textTransform: uppercase
+  axis-mono:
+    fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace"
+    fontSize: 26
+    fontWeight: 500
+    letterSpacing: 0.08em
+  stat-figure:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 220
+    fontWeight: 500
+    lineHeight: 0.92
+    letterSpacing: -0.03em
+  stat-figure-unit:
+    fontFamily: "'Source Serif 4', 'Source Serif Pro', Georgia, serif"
+    fontSize: 110
+    fontWeight: 500
+    lineHeight: 0.92
+
+spacing:
+  slide-pad-default: "96px 120px"
+  slide-pad-narrow: "100px 120px"
+  slide-pad-wide: "100px 140px"
+  slide-pad-statement: "130px 160px"
+  grid-gap-cards: 28
+  grid-gap-topics: 24
+  grid-gap-kpi: 60
+  rule-weight: "2px"
+  rule-weight-card: "2.5px"
+  radius-card: "6px"
+  radius-card-step: "8px"
+  radius-bar-top: "3px 3px 0 0"
+  radius-mark-circle: "50%"
+
+canvas:
+  width: 1920px
+  height: 1080px
+
+components:
+  topic-tile:
+    
+
 1. Cover (cover)
 2. Agenda (agenda)
 3. Insights (insights)

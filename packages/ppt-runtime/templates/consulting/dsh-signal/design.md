@@ -12,6 +12,127 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  A literary editorial presentation system in the spirit of a long-form magazine — The Economist's restraint crossed with a private intelligence briefing. Source Serif 4 carries every headline with roman/italic mixing mid-sentence in antique gold, DM Sans steps back for body, and IBM Plex Mono runs all the timestamps, kickers, and chrome. The dual surface system is warm cream paper (#F0ECE3) and deep editorial navy (#1C2644), connected by a single hot accent — antique gold (#C8A870) — used only on rules, italic emphasis, and numerical figures. A near-invisible 80px grid texture overlays every dark slide as a fingerprint. The effect is sober, considered, and a little bit aristocratic.
 
+colors:
+  navy: "#1C2644"
+  navy-alt: "#232F55"
+  cream: "#F0ECE3"
+  cream-alt: "#E6E0D4"
+  text-warm: "#E2DCD0"
+  text-muted-dark: "#8A96A8"
+  text-hint-dark: "#4E5A6E"
+  ink: "#1A2030"
+  text-muted-light: "#5A6270"
+  text-hint-light: "#9AA0A8"
+  gold: "#C8A870"
+  border-dark: "#2E3D5C"
+  border-light: "#CAC4B4"
+
+color-aliases:
+  c-bg: navy
+  c-bg-alt: navy-alt
+  c-bg-light: cream
+  c-bg-light-alt: cream-alt
+  c-fg: text-warm
+  c-fg-2: text-muted-dark
+  c-fg-3: text-hint-dark
+  c-fg-light: ink
+  c-fg-light-2: text-muted-light
+  c-fg-light-3: text-hint-light
+  c-accent: gold
+  c-border: border-dark
+  c-border-light: border-light
+
+typography:
+  display:
+    fontFamily: "Source Serif 4, Noto Serif SC, Georgia, serif"
+    fontSize: 9.5vw
+    fontWeight: 700
+    lineHeight: 0.96
+    letterSpacing: -0.02em
+  h1:
+    fontFamily: "Source Serif 4, Noto Serif SC, Georgia, serif"
+    fontSize: 5.2vw
+    fontWeight: 600
+    lineHeight: 1.08
+    letterSpacing: -0.01em
+  h2:
+    fontFamily: "Source Serif 4, Noto Serif SC, Georgia, serif"
+    fontSize: 3vw
+    fontWeight: 600
+    lineHeight: 1.18
+  h3:
+    fontFamily: "Source Serif 4, Noto Serif SC, Georgia, serif"
+    fontSize: 1.9vw
+    fontWeight: 500
+    lineHeight: 1.3
+  lead:
+    fontFamily: "DM Sans, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 1.4vw
+    fontWeight: 400
+    lineHeight: 1.58
+  body:
+    fontFamily: "DM Sans, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 1.05vw
+    fontWeight: 400
+    lineHeight: 1.65
+  caption:
+    fontFamily: "DM Sans, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 0.82vw
+    fontWeight: 400
+    lineHeight: 1.5
+  label:
+    fontFamily: "IBM Plex Mono, JetBrains Mono, monospace"
+    fontSize: 0.7vw
+    fontWeight: 500
+    letterSpacing: 0.14em
+    textTransform: uppercase
+  stat-value:
+    fontFamily: "Source Serif 4, Noto Serif SC, Georgia, serif"
+    fontSize: 5.5vw
+    fontWeight: 600
+    lineHeight: 1
+    letterSpacing: -0.02em
+  quote-text:
+    fontFamily: "Source Serif 4, Noto Serif SC, Georgia, serif"
+    fontSize: 3.6vw
+    fontWeight: 400
+    lineHeight: 1.28
+    letterSpacing: -0.01em
+  quote-mark:
+    fontFamily: "Source Serif 4, Noto Serif SC, Georgia, serif"
+    fontSize: 8vw
+    fontWeight: 300
+    lineHeight: 0.6
+  editorial-headline:
+    fontFamily: "Source Serif 4, Noto Serif SC, Georgia, serif"
+    fontSize: 2.75vw
+    fontWeight: 600
+    lineHeight: 1.2
+  dense-headline:
+    fontFamily: "Source Serif 4, Noto Serif SC, Georgia, serif"
+    fontSize: 2.4vw
+    fontWeight: 600
+    lineHeight: 1.2
+
+spacing:
+  pad-x: 7.5vw
+  pad-y: 5.5vh
+  gap-lg: 4vh
+  gap-md: 2.5vh
+  gap-sm: 1.2vh
+  grid-cell: 80px
+
+canvas:
+  width: 100vw
+  height: 100vh
+
+components:
+  rule-short:
+    width: 36px
+    height: 1px
+    background: "{colors.gold}"
+    
+
 1. Cover (cover)
 2. Agenda (agenda)
 3. Insights (insights)

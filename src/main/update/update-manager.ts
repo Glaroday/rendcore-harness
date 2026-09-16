@@ -1,3 +1,5 @@
+import { checkDesktopUpdate } from '../desktop-service'
+import { isPrereleaseVersion, isVersion } from '../desktop-service/service'
 import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
 import electronUpdater from 'electron-updater'
 import type { UpdateStatus } from '../../shared/contracts'
@@ -54,6 +56,7 @@ let manualCheck = false
 let pendingDowngrade = false
 let updateFeedConfig: UpdateFeedConfig = { feedUrls: [], fallbackToGitHub: true }
 let activeMirrorIndex = -1
+let selectedUpdateVersion: string | undefined
 
 export function getUpdateStatus(): UpdateStatus {
   return { ...status }
@@ -154,7 +157,23 @@ export async function checkForUpdates(manual = false): Promise<UpdateStatus> {
   transition({ type: 'check', manual })
   manualCheck = manual
   lastCheckedAt = Date.now()
-  checkPromise = checkUsingConfiguredFeeds()
+  selectedUpdateVersion = undefined
+  checkPromise = (async () => {
+    const policy = await checkDesktopUpdate()
+    if (!policy.updateAvailable) {
+      transition({ type: 'not-available' })
+      scheduleReset()
+      return
+    }
+    selectedUpdateVersion = policy.version
+    autoUpdater.setFeedURL({ provider: 'generic', url: policy.feedUrl })
+    autoUpdater.allowPrerelease = isPrereleaseVersion(policy.version)
+    autoUpdater.allowDowngrade = false
+    const result = await autoUpdater.checkForUpdates()
+    if (result?.updateInfo.version !== policy.version) {
+      throw new Error('Update archive does not match the selected version')
+    }
+  })()
 
   try {
     await checkPromise
@@ -195,15 +214,17 @@ export async function downloadAvailableUpdate(): Promise<UpdateStatus> {
  * — there is no version pinning.
  */
 export async function installSpecificVersion(version: unknown): Promise<UpdateStatus> {
-  if (typeof version !== 'string' || !version) return getUpdateStatus()
+  if (!isVersion(version)) return getUpdateStatus()
   if (!supportsUpdates()) return getUpdateStatus()
   if (checkPromise || ['checking', 'downloading', 'downloaded'].includes(status.phase)) {
     return getUpdateStatus()
   }
 
+  selectedUpdateVersion = version
   pendingDowngrade = compareVersions(version, app.getVersion()) < 0
   autoUpdater.setFeedURL({ provider: 'generic', url: archiveFeedUrl(version) })
   autoUpdater.allowDowngrade = true
+  autoUpdater.allowPrerelease = isPrereleaseVersion(version)
   manualCheck = true
   transition({ type: 'check', manual: true })
   lastCheckedAt = Date.now()
@@ -225,6 +246,7 @@ export async function installSpecificVersion(version: unknown): Promise<UpdateSt
     configureFirstFeed()
     autoUpdater.allowDowngrade = false
     pendingDowngrade = false
+    autoUpdater.allowPrerelease = false
   }
 
   return getUpdateStatus()
@@ -256,7 +278,7 @@ export function stopUpdateManager(): void {
 
 function configureUpdater(): void {
   updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
-  configureFirstFeed()
+  configureFirstFeed(false)
   // The download is ours to start: an update the user skipped should not be
   // fetched at all, and update-available is the only place that is known.
   autoUpdater.autoDownload = false
@@ -276,6 +298,10 @@ function configureUpdater(): void {
     transition({ type: 'check', manual: status.manual })
   )
   autoUpdater.on('update-available', (info) => {
+    if (selectedUpdateVersion !== undefined && info.version !== selectedUpdateVersion) {
+      transition({ type: 'error', message: 'Update archive does not match the selected version' })
+      return
+    }
     if (!shouldOfferUpdate(info.version, currentSkippedVersion(), manualCheck)) {
       console.info('[updater] skipping', info.version, 'at the user’s request')
       transition({ type: 'reset' })
@@ -321,8 +347,9 @@ function parseFeedSettings(value: unknown): UpdateFeedSettings {
   }
 }
 
-function configureFirstFeed(): void {
+function configureFirstFeed(applyFeed = true): void {
   activeMirrorIndex = updateFeedConfig.feedUrls.length > 0 ? 0 : -1
+  if (!applyFeed) return
   const first = updateFeedConfig.feedUrls[0]
   if (first) autoUpdater.setFeedURL({ provider: 'generic', url: first })
   else configureGitHubFeed()

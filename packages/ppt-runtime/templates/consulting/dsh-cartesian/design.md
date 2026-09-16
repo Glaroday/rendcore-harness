@@ -12,6 +12,123 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  A quiet, museum-catalog editorial system built on Playfair Display serif headlines, Inter sans body, and a five-tone warm-stone palette. The aesthetic is "consulting deck meets architectural monograph" — minimal geometric line decorations (thin circles, dashed arcs, vertical and horizontal hairlines) drift behind content, suggesting drafting paper and compass work. Every divider is a single 1px line in a muted taupe; nothing is bold, nothing is loud. The cultural reference is Massimo Vignelli's editorial work, the Cooper Hewitt catalog, and pencil-and-tracing-paper urban planning documents.
 
+colors:
+  bg-primary: "#EDE8E0"
+  bg-secondary: "#E2DBD1"
+  text-primary: "#1A1A1A"
+  text-secondary: "#5A5A5A"
+  accent: "#8A8178"
+  line: "#B8B0A4"
+  white-overlay: "rgba(255, 255, 255, 0.3)"
+
+typography:
+  display:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "clamp(3rem, 6vw, 5.5rem)"
+    fontWeight: 400
+    lineHeight: 1.1
+  h1:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "clamp(2.5rem, 5vw, 4.5rem)"
+    fontWeight: 400
+    lineHeight: 1.1
+  h2:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "clamp(1.8rem, 3.5vw, 3rem)"
+    fontWeight: 400
+    lineHeight: 1.1
+  h3:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "clamp(1.2rem, 2vw, 1.6rem)"
+    fontWeight: 400
+    lineHeight: 1.1
+  stat-figure:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "2rem"
+    fontWeight: 400
+    lineHeight: 1
+  agenda-numeral:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "1.5rem"
+    fontWeight: 400
+    lineHeight: 1
+  team-initial:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "2rem"
+    fontWeight: 400
+    lineHeight: 1
+  quote-mark:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "5rem"
+    fontWeight: 400
+    lineHeight: 1
+  card-headline:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "1.3rem"
+    fontWeight: 400
+    lineHeight: 1.1
+  timeline-headline:
+    fontFamily: "Playfair Display, serif"
+    fontSize: "1.2rem"
+    fontWeight: 400
+    lineHeight: 1.1
+  body:
+    fontFamily: "Inter, sans-serif"
+    fontSize: "clamp(0.9rem, 1.2vw, 1.1rem)"
+    fontWeight: 400
+    lineHeight: 1.6
+  body-sm:
+    fontFamily: "Inter, sans-serif"
+    fontSize: "0.9rem"
+    fontWeight: 400
+    lineHeight: 1.6
+  subtitle:
+    fontFamily: "Inter, sans-serif"
+    fontSize: "clamp(1rem, 1.5vw, 1.3rem)"
+    fontWeight: 400
+    lineHeight: 1.5
+  attribution:
+    fontFamily: "Inter, sans-serif"
+    fontSize: "0.85rem"
+    fontWeight: 400
+    lineHeight: 1.4
+    letterSpacing: 2px
+    textTransform: uppercase
+  label:
+    fontFamily: "Inter, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 500
+    lineHeight: 1
+    letterSpacing: 3px
+    textTransform: uppercase
+  micro:
+    fontFamily: "Inter, sans-serif"
+    fontSize: "0.7rem"
+    fontWeight: 400
+    lineHeight: 1
+    letterSpacing: 2px
+    textTransform: uppercase
+
+spacing:
+  pad-y: "4vh"
+  pad-x: "4vw"
+  gap-xl: "6vw"
+  gap-lg: "5vw"
+  gap-md: "3vw"
+  gap-sm: "2vh"
+  card-pad: "4vh 2vw"
+
+canvas:
+  width: 100vw
+  height: 100vh
+
+components:
+  card:
+    border: "1px solid {colors.line}"
+    padding: "{spacing.card-pad}"
+    background: "{colors.white-overlay}"
+    
+
 1. Cover (cover)
 2. Agenda (agenda)
 3. Insights (insights)

@@ -167,7 +167,7 @@ function fallbackModel(id: string): RendCoreModel {
 
 function replaceCatalog(source: string, models: RendCoreModel[]): string {
   const modelMarker = /(\n        models:\r?\n)[\s\S]*?(?=\r?\n\r?\n\S)/
-  if (!modelMarker.test(source)) throw new Error('RendCore provider model block was not found')
+  if (!modelMarker.test(source)) return source
   const rows = models.map((model) => [
     `          - id: ${JSON.stringify(model.id)}`,
     `            name: ${JSON.stringify(model.name)}`,

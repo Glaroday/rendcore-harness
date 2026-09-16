@@ -12,6 +12,116 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  "A warm, hand-crafted editorial system built on a peach-clay canvas with charcoal ink as the only \"color.\" Display type runs in Syne (weight 700–800, tight negative tracking); body type runs in Space Grotesk at weight 400–500. The aesthetic borrows from independent studio decks, risograph zines, and sketchbook spreads: organic blob frames, scribbled SVG doodles, slightly rotated cards, and double-stroke offset borders give every slide a hand-touched, unpolished warmth. The effect is creative-studio editorial, not corporate pitch — confident but human, structured but loose."
 
+colors:
+  bg: "#F0C8A0"
+  bg-alt: "#E8B88E"
+  light: "#F7DEC6"
+  text: "#1A1A1A"
+
+color-aliases:
+  accent: text
+
+typography:
+  display-hero:
+    fontFamily: "Syne, sans-serif"
+    fontSize: "clamp(4rem, 10vw, 9rem)"
+    fontWeight: 800
+    lineHeight: 0.9
+    letterSpacing: -0.03em
+  display:
+    fontFamily: "Syne, sans-serif"
+    fontSize: "clamp(3rem, 8vw, 7rem)"
+    fontWeight: 800
+    lineHeight: 0.9
+    letterSpacing: -0.02em
+  headline:
+    fontFamily: "Syne, sans-serif"
+    fontSize: "clamp(2.5rem, 6vw, 5rem)"
+    fontWeight: 700
+    lineHeight: 1.0
+    letterSpacing: -0.01em
+  statement:
+    fontFamily: "Syne, sans-serif"
+    fontSize: "clamp(2.5rem, 5vw, 4.5rem)"
+    fontWeight: 700
+    lineHeight: 1.1
+    letterSpacing: -0.01em
+  title:
+    fontFamily: "Syne, sans-serif"
+    fontSize: "clamp(2rem, 4vw, 3.5rem)"
+    fontWeight: 700
+    lineHeight: 1.1
+    letterSpacing: -0.01em
+  title-sm:
+    fontFamily: "Syne, sans-serif"
+    fontSize: "1.3rem"
+    fontWeight: 700
+    lineHeight: 1.2
+  number-hero:
+    fontFamily: "Syne, sans-serif"
+    fontSize: "clamp(4rem, 8vw, 7rem)"
+    fontWeight: 800
+    lineHeight: 1.0
+  number-md:
+    fontFamily: "Syne, sans-serif"
+    fontSize: "2.5rem"
+    fontWeight: 800
+    lineHeight: 1.0
+  number-sm:
+    fontFamily: "Syne, sans-serif"
+    fontSize: "2rem"
+    fontWeight: 800
+    lineHeight: 1.0
+  body:
+    fontFamily: "Space Grotesk, sans-serif"
+    fontSize: "clamp(1rem, 1.2vw, 1.1rem)"
+    fontWeight: 400
+    lineHeight: 1.7
+  body-md:
+    fontFamily: "Space Grotesk, sans-serif"
+    fontSize: "1.2rem"
+    fontWeight: 500
+    lineHeight: 1.6
+  label-eyebrow:
+    fontFamily: "Space Grotesk, sans-serif"
+    fontSize: "0.85rem"
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: 0.15em
+    textTransform: uppercase
+  caption:
+    fontFamily: "Space Grotesk, sans-serif"
+    fontSize: "0.85rem"
+    fontWeight: 500
+    lineHeight: 1.4
+  tag:
+    fontFamily: "Space Grotesk, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 600
+    lineHeight: 1.2
+
+spacing:
+  pad-slide-lg: "4rem 5rem"
+  pad-slide-md: "3rem 4rem"
+  pad-card-lg: "2rem 3rem"
+  pad-card-md: "1.5rem"
+  gap-lg: "3rem"
+  gap-md: "2rem"
+  gap-sm: "1.5rem"
+
+canvas:
+  width: 100vw
+  height: 100vh
+
+components:
+  rough-box:
+    border: "3px solid {colors.text}"
+    background: "{colors.bg}"
+    padding: "1.5rem"
+    offsetShadowOffset: "6px 6px"
+    offsetShadowBorder: "2–3px solid {colors.text}"
+    
+
 1. Cover (cover)
 2. Agenda (agenda)
 3. Insights (insights)

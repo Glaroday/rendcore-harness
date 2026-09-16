@@ -12,6 +12,131 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  A protest-poster editorial system built on massive Barlow type and a single fire-orange environment color. The aesthetic is "ink on fire" — dark slides for documentation, orange slides for declaration. Display type is enormous (13vw, roughly 187px at 1440 width) in weight 900 lowercase, treating words as graphic elements rather than reading copy. The cultural reference is broadside printing, SPACE10 reports, and Wim Crouwel grids reinterpreted with one loud color and zero decoration.
 
+colors:
+  ink-black: "#111111"
+  ink-black-alt: "#1A1A18"
+  fire-orange: "#E85D26"
+  cream: "#F0ECE5"
+  cream-muted: "#888880"
+  cream-hint: "#505048"
+  border-dark: "#282826"
+  ink-on-orange-muted: "rgba(17, 17, 17, 0.75)"
+  ink-on-orange-hint: "rgba(17, 17, 17, 0.55)"
+  ink-on-orange-faint: "rgba(17, 17, 17, 0.40)"
+  ink-on-orange-border: "rgba(17, 17, 17, 0.20)"
+
+color-aliases:
+  c-bg: ink-black
+  c-bg-alt: ink-black-alt
+  c-bg-light: ink-black            # Broadside collapses "light" → dark; there are no cream slides
+  c-bg-orange: fire-orange
+  c-fg: cream
+  c-fg-2: cream-muted
+  c-fg-3: cream-hint
+  c-accent: fire-orange
+  c-border: border-dark
+
+typography:
+  display:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "13vw"
+    fontWeight: 900
+    lineHeight: 0.88
+    letterSpacing: -0.04em
+  h1:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "7.5vw"
+    fontWeight: 800
+    lineHeight: 0.9
+    letterSpacing: -0.03em
+  h2:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "4.5vw"
+    fontWeight: 700
+    lineHeight: 1.1
+    letterSpacing: -0.02em
+  h3:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "2.8vw"
+    fontWeight: 600
+    lineHeight: 1.2
+  lead:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "1.6vw"
+    fontWeight: 400
+    lineHeight: 1.5
+  body:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "1.2vw"
+    fontWeight: 400
+    lineHeight: 1.6
+  caption:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "0.9vw"
+    fontWeight: 400
+    lineHeight: 1.5
+  label:
+    fontFamily: "IBM Plex Mono, monospace"
+    fontSize: "0.72vw"
+    fontWeight: 500
+    lineHeight: 1
+    letterSpacing: 0.14em
+    textTransform: uppercase
+  stat-value:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "5.5vw"
+    fontWeight: 900
+    lineHeight: 1
+    letterSpacing: -0.04em
+  quote-mark:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "10vw"
+    fontWeight: 900
+    lineHeight: 0.6
+  quote-text:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "3.8vw"
+    fontWeight: 700
+    lineHeight: 1.15
+    letterSpacing: -0.02em
+  fadelist-item:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "7.5vw"
+    fontWeight: 900
+    lineHeight: 1
+    letterSpacing: -0.03em
+  fadelist-title:
+    fontFamily: "Barlow, Noto Sans SC, sans-serif"
+    fontSize: "10.5vw"
+    fontWeight: 900
+    lineHeight: 0.9
+    letterSpacing: -0.04em
+
+spacing:
+  pad-x: "5.5vw"
+  pad-y: "5.5vh"
+  gap-lg: "3.5vh"
+  gap-md: "2vh"
+  gap-sm: "1vh"
+
+canvas:
+  width: 100vw
+  height: 100vh
+
+motion:
+  ease-slide: "cubic-bezier(0.77, 0, 0.175, 1)"
+  dur-slide: "0.8s"
+  ease-enter: "cubic-bezier(0.16, 1, 0.3, 1)"
+  dur-enter: "0.5s"
+
+components:
+  slide-chrome:
+    layout: "flex row, justify space-between"
+    paddingBottom: "{spacing.gap-sm}"
+    borderBottom: "1px solid {colors.border-dark}"
+    marginBottom: "{spacing.gap-md}"
+    
+
 1. Cover (cover)
 2. Editorial thesis (insights)
 3. Evidence spread (data)

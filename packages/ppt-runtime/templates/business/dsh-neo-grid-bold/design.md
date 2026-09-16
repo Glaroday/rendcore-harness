@@ -12,6 +12,135 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  A heavy editorial poster system built on a strict 12-column × 8-row block grid with neon-yellow accents on putty-ecru. Space Grotesk at weight 700 in strict uppercase carries every display moment; JetBrains Mono carries every label and metadata tag. Each slide reads as a magazine spread divided into colored panels — paper-ecru, ink-black, and electric lemon-yellow trading roles across cells. The aesthetic borrows from contemporary editorial print, brutalist annual reports, and the populist-poster end of design week showcases.
 
+colors:
+  paper: "#F5F4EF"
+  bg: "#ECECE8"
+  ink: "#0A0A0A"
+  accent-lemon: "#E6FF3D"
+  muted: "#8A8A85"
+  stage-bg: "#1A1A1A"
+
+color-aliases:
+  line: ink
+  primary-bg: bg
+  card-bg: paper
+
+typography:
+  display:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 132px
+    fontWeight: 700
+    lineHeight: 0.92
+    letterSpacing: -0.02em
+    textTransform: uppercase
+  title:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 88px
+    fontWeight: 700
+    lineHeight: 0.95
+    letterSpacing: -0.015em
+    textTransform: uppercase
+  subtitle:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 56px
+    fontWeight: 700
+    lineHeight: 1.0
+    letterSpacing: -0.01em
+    textTransform: uppercase
+  section-num:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 320px
+    fontWeight: 700
+    lineHeight: 0.85
+    letterSpacing: -0.05em
+  stat-num:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 156px
+    fontWeight: 700
+    lineHeight: 0.9
+    letterSpacing: -0.03em
+  stat-num-lg:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 240px
+    fontWeight: 700
+    lineHeight: 0.85
+    letterSpacing: -0.04em
+  stat-num-sm:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 96px
+    fontWeight: 700
+    lineHeight: 0.9
+    letterSpacing: -0.03em
+  card-headline:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 44px
+    fontWeight: 700
+    lineHeight: 1.0
+    letterSpacing: -0.01em
+    textTransform: uppercase
+  card-h3:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 30px
+    fontWeight: 700
+    lineHeight: 1.05
+    letterSpacing: -0.005em
+    textTransform: uppercase
+  body:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 28px
+    fontWeight: 400
+    lineHeight: 1.35
+  body-sm:
+    fontFamily: "Space Grotesk, Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: 22px
+    fontWeight: 400
+    lineHeight: 1.45
+  label:
+    fontFamily: "JetBrains Mono, ui-monospace, monospace"
+    fontSize: 24px
+    fontWeight: 400
+    letterSpacing: 0.08em
+    textTransform: uppercase
+  label-sm:
+    fontFamily: "JetBrains Mono, ui-monospace, monospace"
+    fontSize: 16px
+    fontWeight: 400
+    letterSpacing: 0.08em
+    textTransform: uppercase
+  label-xs:
+    fontFamily: "JetBrains Mono, ui-monospace, monospace"
+    fontSize: 14px
+    fontWeight: 400
+    letterSpacing: 0.12em
+    textTransform: uppercase
+  pagenum:
+    fontFamily: "JetBrains Mono, ui-monospace, monospace"
+    fontSize: 24px
+    fontWeight: 400
+    letterSpacing: 0.04em
+
+spacing:
+  frame-inset: 40px
+  grid-gap: 12px
+  grid-gap-lg: 18px
+  card-pad-sm: "24px 28px"
+  card-pad-md: "28px 32px"
+  card-pad-lg: "36px 32px"
+  card-pad-xl: "40px 44px"
+
+canvas:
+  width: 1920px
+  height: 1080px
+
+components:
+  frame:
+    position: "absolute; inset: 40px"
+    display: grid
+    gridTemplateColumns: "repeat(12, 1fr)"
+    gridTemplateRows: "repeat(8, 1fr)"
+    gap: "{spacing.grid-gap}"
+    
+
 1. Cover (cover)
 2. Agenda (agenda)
 3. Insights (insights)

@@ -91,6 +91,7 @@ describe('DSH Desktop client slot occupants', () => {
       'conversation.hero.brand.mark'
     ])
     expect(appended).toHaveLength(1)
+    expect(appended[0]!.textContent).toContain('.dshDesktopBrandDark')
 
     const sidebarName = registrations.find(
       ({ config }) => config.name === 'sidebar.brand.name'
@@ -103,6 +104,14 @@ describe('DSH Desktop client slot occupants', () => {
     )!.component({ size: 24 }) as { type: unknown; props: Record<string, unknown> }
     expect(sidebarMark.type).toBe('svg')
     expect(sidebarMark.props.height).toBe(17)
+    const [lightMark, darkMark] = sidebarMark.props.children as [
+      { type: unknown; props: Record<string, unknown> },
+      { type: unknown; props: Record<string, unknown> }
+    ]
+    expect(lightMark.type).toBe('image')
+    expect(lightMark.props.href).toBe('/dsh-desktop-logo-light.png')
+    expect(darkMark.type).toBe('image')
+    expect(darkMark.props.href).toBe('/dsh-desktop-logo-dark.png')
 
     const heroMark = registrations.find(
       ({ config }) => config.name === 'conversation.hero.brand.mark'

@@ -126,7 +126,6 @@ async function exists(path: string): Promise<boolean> {
 export function hasProfile(dshHome: string): boolean {
   return existsSync(profilePackageJsonPath(dshHome))
 }
-
 function parseSemverTuple(v: string): [number, number, number] {
   const clean = v.replace(/^[^0-9]+/, '')
   const parts = clean.split('.').map((x) => parseInt(x, 10) || 0)

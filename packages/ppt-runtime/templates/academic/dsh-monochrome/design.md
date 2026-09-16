@@ -12,6 +12,112 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  A literary editorial system rendered in black ink on cream paper. Ultra-light geometric sans (Jost at weight 200–300) carries every headline; Lora italic serif handles quote text and insight-card titles; JetBrains Mono provides the structural chrome. There are no chromatic accents — every color in the palette is a graphite or cream tone, and "accent" simply means "darker ink." The aesthetic borrows from independent research reports, scholarly monographs, and the quietest end of contemporary editorial design — closer to a printed journal than a tech presentation.
 
+colors:
+  cream-paper: "#FAFADF"
+  cream-paper-2: "#F2F2D2"
+  cream-paper-3: "#F0F0D4"
+  cream-warm: "#F5F0E4"
+  ink-black: "#1A1A16"
+  ink-graphite: "#5E5E54"
+  ink-graphite-light: "#8A8A80"
+
+color-aliases:
+  c-bg: cream-paper
+  c-bg-light: cream-paper
+  c-bg-cream: cream-warm
+  c-fg: ink-black
+  c-fg-light: ink-black
+  c-fg-2: ink-graphite
+  c-fg-3: ink-graphite-light
+  c-accent: ink-black
+  c-border: ink-black
+  c-border-light: ink-black
+
+typography:
+  display:
+    fontFamily: "Jost, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 8.5vw
+    fontWeight: 200
+    lineHeight: 0.96
+    letterSpacing: -0.02em
+  h1:
+    fontFamily: "Jost, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 5vw
+    fontWeight: 200
+    lineHeight: 1.1
+    letterSpacing: -0.01em
+  h2:
+    fontFamily: "Jost, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 3.2vw
+    fontWeight: 300
+    lineHeight: 1.2
+  h3:
+    fontFamily: "Jost, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 2vw
+    fontWeight: 400
+    lineHeight: 1.3
+  lead:
+    fontFamily: "Jost, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 1.5vw
+    fontWeight: 300
+    lineHeight: 1.65
+  body:
+    fontFamily: "Jost, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 1.1vw
+    fontWeight: 300
+    lineHeight: 1.7
+  caption:
+    fontFamily: "Jost, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 0.85vw
+    fontWeight: 300
+    lineHeight: 1.55
+  label:
+    fontFamily: "JetBrains Mono, monospace"
+    fontSize: 0.72vw
+    fontWeight: 400
+    letterSpacing: 0.12em
+    textTransform: uppercase
+  quote-serif:
+    fontFamily: "Lora, Noto Serif SC, Georgia, serif"
+    fontSize: 3.2vw
+    fontWeight: 400
+    lineHeight: 1.35
+  insight-serif:
+    fontFamily: "Lora, Noto Serif SC, Georgia, serif"
+    fontSize: 2.8vw
+    fontWeight: 400
+    lineHeight: 1.15
+  stat-value:
+    fontFamily: "Jost, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 5.5vw
+    fontWeight: 200
+    lineHeight: 1.0
+    letterSpacing: -0.03em
+  flow-num:
+    fontFamily: "Jost, Noto Sans SC, system-ui, sans-serif"
+    fontSize: 3.5vw
+    fontWeight: 200
+    lineHeight: 1.0
+    letterSpacing: -0.02em
+
+spacing:
+  pad-x: 8vw
+  pad-y: 6vh
+  gap-lg: 5vh
+  gap-md: 3vh
+  gap-sm: 1.5vh
+
+canvas:
+  width: 100vw
+  height: 100vh
+
+components:
+  rule:
+    width: 36px
+    height: 1px
+    background: "{colors.ink-black}"
+    
+
 1. Cover (cover)
 2. Agenda (agenda)
 3. Insights (insights)

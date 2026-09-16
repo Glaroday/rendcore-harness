@@ -24,6 +24,10 @@
       "types": "./plugin-config-migrations.d.ts",
       "default": "./plugin-config-migrations.mjs"
     },
+    "./market-registry": {
+      "types": "./market-registry.d.ts",
+      "default": "./market-registry.mjs"
+    },
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -39,7 +43,7 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.2-rc.1"
+    "@deepseek-ai/dsh-host-webserver": "^0.1.5-rc.1"
   },
   "dependencies": {
     "pnpm": "10.34.5"

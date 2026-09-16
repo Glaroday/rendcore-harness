@@ -5,9 +5,9 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   clearDamagedPackageDirectories,
-  ensureMinimumMarketBaseline,
   findDamagedPackageDirectories,
   hasProfile,
+  ensureMinimumMarketBaseline,
   isSemverLessThan,
   VERIFIED_MARKET_BASELINE
 } from '../src/main/state/profile-repair'
@@ -162,7 +162,6 @@ describe('profile repair', () => {
       '--no-frozen-lockfile'
     ])
   })
-
   it('compares semver versions correctly', () => {
     expect(isSemverLessThan('1.36.0', '1.40.0')).toBe(true)
     expect(isSemverLessThan('^1.35.0', '1.40.0')).toBe(true)

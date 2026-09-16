@@ -12,6 +12,193 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  "A cassette-package editorial system on warm cream paper with a six-color primary palette and warm-brown ink. Display type runs in Big Shoulders Display (condensed industrial display sans at weight 900); body in Albert Sans; tabular and tag content in JetBrains Mono; occasional Japanese accents in Noto Sans JP. The aesthetic borrows from 1970s consumer cassette packaging, Japanese print catalogues, and lo-fi product zines: petal-cluster blob clusters, diagonal multi-color ribbon bands, 12-point starburst seals, red rectangular stamps, and tracked uppercase micro-labels. The effect is hand-curated industrial editorial — warm but disciplined, playful but tightly typeset, with the cassette as its visual metaphor."
 
+colors:
+  paper: "#F1E6CB"
+  paper-dk: "#E5D6B0"
+  ink: "#3A2516"
+  red: "#E5392A"
+  pink: "#E54489"
+  orange: "#F09131"
+  green: "#3D9F47"
+  blue: "#3F8BC4"
+  yellow: "#F0BC2A"
+
+color-aliases:
+  line: ink
+
+typography:
+  disp-hero:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(120px, min(14vw, 22vh), 280px)"
+    fontWeight: 900
+    lineHeight: 0.84
+    letterSpacing: -0.025em
+  disp-statement:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(70px, min(8.4vw, 14vh), 168px)"
+    fontWeight: 900
+    lineHeight: 0.86
+    letterSpacing: -0.022em
+  disp-title:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(80px, min(9vw, 14vh), 180px)"
+    fontWeight: 900
+    lineHeight: 0.86
+    letterSpacing: -0.022em
+  disp-lockup:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(56px, min(7vw, 11vh), 130px)"
+    fontWeight: 900
+    lineHeight: 0.9
+    letterSpacing: -0.015em
+  disp-section:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(52px, min(5.6vw, 9vh), 100px)"
+    fontWeight: 900
+    lineHeight: 0.9
+    letterSpacing: -0.018em
+  disp-quote:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(48px, min(5.4vw, 9vh), 110px)"
+    fontWeight: 900
+    lineHeight: 0.92
+    letterSpacing: -0.018em
+  disp-quote-lg:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(56px, min(6.4vw, 10.5vh), 130px)"
+    fontWeight: 900
+    lineHeight: 0.9
+    letterSpacing: -0.018em
+  disp-brand:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(32px, min(3.4vw, 5.4vh), 56px)"
+    fontWeight: 900
+    lineHeight: 0.92
+    letterSpacing: -0.02em
+  disp-card-name:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(28px, min(2.6vw, 4.6vh), 48px)"
+    fontWeight: 900
+    lineHeight: 0.94
+    letterSpacing: -0.012em
+  num-hero:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(110px, min(11vw, 18vh), 240px)"
+    fontWeight: 900
+    lineHeight: 0.86
+    letterSpacing: -0.025em
+  num-md:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(70px, min(7vw, 11vh), 150px)"
+    fontWeight: 900
+    lineHeight: 0.86
+    letterSpacing: -0.02em
+  ttl-row:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(22px, 1.7vw, 30px)"
+    fontWeight: 700
+    lineHeight: 1.1
+    letterSpacing: -0.005em
+  body:
+    fontFamily: "'Albert Sans', sans-serif"
+    fontSize: "clamp(14px, 1vw, 17px)"
+    fontWeight: 400
+    lineHeight: 1.5
+  body-md:
+    fontFamily: "'Albert Sans', sans-serif"
+    fontSize: "clamp(14px, 0.95vw, 15px)"
+    fontWeight: 400
+    lineHeight: 1.4
+  body-emphasis:
+    fontFamily: "'Albert Sans', sans-serif"
+    fontSize: "clamp(15px, 1.1vw, 20px)"
+    fontWeight: 600
+    lineHeight: 1.4
+  micro:
+    fontFamily: "'Albert Sans', sans-serif"
+    fontSize: "clamp(12px, 0.9vw, 14px)"
+    fontWeight: 700
+    lineHeight: 1.2
+    letterSpacing: 0.16em
+    textTransform: uppercase
+  micro-lg:
+    fontFamily: "'Albert Sans', sans-serif"
+    fontSize: "clamp(12px, 0.9vw, 14px)"
+    fontWeight: 700
+    lineHeight: 1.2
+    letterSpacing: 0.2em
+    textTransform: uppercase
+  micro-xl:
+    fontFamily: "'Albert Sans', sans-serif"
+    fontSize: "clamp(12px, 0.92vw, 14px)"
+    fontWeight: 700
+    lineHeight: 1.2
+    letterSpacing: 0.32em
+    textTransform: uppercase
+  micro-spec:
+    fontFamily: "'Albert Sans', sans-serif"
+    fontSize: "clamp(14px, 1.1vw, 20px)"
+    fontWeight: 700
+    lineHeight: 1.2
+    letterSpacing: 0.04em
+  mono:
+    fontFamily: "'JetBrains Mono', ui-monospace, monospace"
+    fontSize: "clamp(11px, 0.78vw, 12px)"
+    fontWeight: 400
+    lineHeight: 1.3
+    letterSpacing: 0.02em
+  mono-md:
+    fontFamily: "'JetBrains Mono', ui-monospace, monospace"
+    fontSize: "clamp(14px, 0.95vw, 16px)"
+    fontWeight: 400
+    lineHeight: 1.3
+    letterSpacing: 0.02em
+  mono-tag:
+    fontFamily: "'JetBrains Mono', ui-monospace, monospace"
+    fontSize: "clamp(12px, 0.85vw, 14px)"
+    fontWeight: 400
+    lineHeight: 1.0
+    letterSpacing: 0.04em
+  jp:
+    fontFamily: "'Noto Sans JP', sans-serif"
+    fontSize: "inherit"
+    fontWeight: 500
+    lineHeight: inherit
+  stamp-text:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(20px, 1.6vw, 28px)"
+    fontWeight: 900
+    lineHeight: 1.0
+    letterSpacing: 0.02em
+  seal-text:
+    fontFamily: "'Big Shoulders Display', sans-serif"
+    fontSize: "clamp(22px, 2vw, 38px)"
+    fontWeight: 900
+    lineHeight: 0.9
+    letterSpacing: -0.01em
+
+spacing:
+  frame-inset: "clamp(36px, 3.6vw, 72px)"
+  frame-inset-bottom: "clamp(72px, 7vh, 110px)"
+  topbar-gap: "clamp(12px, 1.4vh, 22px)"
+  card-pad-x: "clamp(14px, 1.4vw, 20px)"
+  card-pad-y: "clamp(16px, 1.7vw, 24px)"
+  grid-gap: "clamp(16px, 1.6vw, 26px)"
+  col-gap: "clamp(28px, 3vw, 56px)"
+  pagenum-inset: "clamp(20px, 2.2vh, 36px) clamp(24px, 2.2vw, 44px)"
+
+canvas:
+  width: 100vw
+  height: 100vh
+
+components:
+  paper-texture:
+    backgroundImage: "radial-gradient(circle at 1px 1px, rgba(58,37,22,0.55) 1px, transparent 1.6px)"
+    backgroundSize: "4px 4px"
+    opacity: 0.16
+    zIndex: 1
+    
+
 1. Cover (cover)
 2. Agenda (agenda)
 3. Insights (insights)

@@ -12,6 +12,214 @@ English previews use source/. Chinese examples use source-zh/. Preview language 
 
  A restrained, consulting-grade presentation system on a warm cream canvas (#fdfae7) with a single saturated cobalt blue (#1e2bfa) as the only accent color. Display type runs Space Grotesk for headlines and numerical callouts; Inter handles body and chrome. Cards are soft-tinted cobalt at 4% opacity with 1.5px translucent borders and 10-14px rounded corners — quiet, never bordered in solid color. The aesthetic borrows from investment-research reports, McKinsey-grade quarterly briefings, and contemporary financial dashboards — measured, data-dense without feeling crowded, and unmistakably professional. The system is built for executive readability at distance, with strong typographic hierarchy and a single accent color carrying every emphasis moment.
 
+colors:
+  bg: "#fdfae7"
+  primary: "#1e2bfa"
+  text: "#111111"
+  text-muted: "#6b6b6b"
+  text-light: "#9a9a9a"
+  accent-light: "rgba(30, 43, 250, 0.08)"
+  accent-medium: "rgba(30, 43, 250, 0.15)"
+  border: "rgba(30, 43, 250, 0.2)"
+  card-bg: "rgba(30, 43, 250, 0.04)"
+  positive: "#059669"
+  negative: "#dc2626"
+
+typography:
+  h1:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 700
+    fontSize: "clamp(44.8px, 5vw, 67.2px)"
+    lineHeight: 1.1
+    letterSpacing: -0.02em
+  h2:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 600
+    fontSize: "clamp(28.8px, 3vw, 41.6px)"
+    lineHeight: 1.1
+    letterSpacing: -0.02em
+  h3:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 500
+    fontSize: "clamp(17.6px, 1.8vw, 24px)"
+    lineHeight: 1.3
+    letterSpacing: -0.02em
+  h4-eyebrow:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 600
+    fontSize: "clamp(13.6px, 1.2vw, 16px)"
+    lineHeight: 1.1
+    letterSpacing: 0.08em
+    textTransform: uppercase
+    color: "{colors.primary}"
+  body:
+    fontFamily: "'Inter', sans-serif"
+    fontWeight: 400
+    fontSize: "clamp(13.6px, 1.1vw, 16.8px)"
+    lineHeight: 1.6
+    color: "{colors.text-muted}"
+  metric-value:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 700
+    fontSize: "clamp(35.2px, 3.4vw, 48px)"
+    lineHeight: 1
+    color: "{colors.primary}"
+  metric-label:
+    fontFamily: "'Inter', sans-serif"
+    fontWeight: 600
+    fontSize: "clamp(15.2px, 1.3vw, 17.6px)"
+    lineHeight: 1.3
+    color: "{colors.text}"
+  metric-desc:
+    fontFamily: "'Inter', sans-serif"
+    fontWeight: 400
+    fontSize: "clamp(12.5px, 0.95vw, 14.4px)"
+    lineHeight: 1.5
+    color: "{colors.text-muted}"
+  metric-support:
+    fontFamily: "'Inter', sans-serif"
+    fontWeight: 400
+    fontSize: "clamp(12px, 0.9vw, 13.6px)"
+    lineHeight: 1.45
+    color: "{colors.text-muted}"
+  stat-num:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 700
+    fontSize: "clamp(25.6px, 2.4vw, 33.6px)"
+    lineHeight: 1
+    color: "{colors.primary}"
+  stat-name:
+    fontFamily: "'Inter', sans-serif"
+    fontWeight: 500
+    fontSize: "clamp(13.6px, 1vw, 15.2px)"
+    lineHeight: 1.35
+    color: "{colors.text}"
+  stat-context:
+    fontFamily: "'Inter', sans-serif"
+    fontWeight: 400
+    fontSize: 12px
+    lineHeight: 1.4
+    color: "{colors.text-light}"
+  agenda-num:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 700
+    fontSize: 28.8px
+    lineHeight: 1
+    color: "{colors.primary}"
+  insight-num:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 600
+    fontSize: 12.5px
+    lineHeight: 1.7
+    letterSpacing: 0.05em
+    color: "{colors.primary}"
+  split-highlight:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 500
+    fontSize: "clamp(18.4px, 1.55vw, 24px)"
+    lineHeight: 1.4
+    color: "{colors.text}"
+  blockquote:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 500
+    fontSize: "clamp(25.6px, 2.8vw, 38.4px)"
+    lineHeight: 1.35
+    color: "{colors.text}"
+  quote-mark:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 700
+    fontSize: "128px"
+    lineHeight: 0.5
+    color: "{colors.primary}"
+    opacity: 0.15
+  step-circle-text:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 700
+    fontSize: 20.8px
+    lineHeight: 1
+  step-title:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 600
+    fontSize: "clamp(15.2px, 1.4vw, 18.4px)"
+    lineHeight: 1.2
+  bar-label:
+    fontFamily: "'Inter', sans-serif"
+    fontWeight: 500
+    fontSize: "clamp(12.8px, 1.1vw, 16px)"
+    lineHeight: 1.3
+    color: "{colors.text}"
+  bar-pct:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 600
+    fontSize: 15.2px
+    color: "{colors.primary}"
+  tag:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 500
+    fontSize: 12px
+    lineHeight: 1
+    color: "{colors.primary}"
+  counter:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 500
+    fontSize: 12.8px
+    lineHeight: 1
+    letterSpacing: 0.05em
+    color: "{colors.text-muted}"
+  meta:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 400
+    fontSize: 12.8px
+    lineHeight: 1.4
+    letterSpacing: 0.05em
+    color: "{colors.text-light}"
+  cite:
+    fontFamily: "'Space Grotesk', sans-serif"
+    fontWeight: 500
+    fontSize: 12.5px
+    lineHeight: 1.4
+    letterSpacing: 0.04em
+    textTransform: uppercase
+    color: "{colors.text-muted}"
+
+spacing:
+  pad-slide-x: "4vw"
+  pad-slide-y-top: "3.5vw"
+  pad-slide-y-bottom: "8.5vh"
+  pad-card-lg: "1.5rem 1.6rem"
+  pad-card-md: "1.4rem 1.5rem"
+  pad-card-sm: "1rem 1.2rem"
+  pad-mini: "0.9rem 1rem"
+  gap-grid-lg: "3.5rem"
+  gap-grid-md: "2rem 3rem"
+  gap-grid-sm: "1.5rem"
+  gap-cards: "1.2rem"
+  gap-mini: "1rem"
+  header-margin: "2.5vh"
+  accent-line-width: "60px"
+  accent-line-height: "4px"
+
+canvas:
+  width: 100vw
+  height: 100vh
+  background: "{colors.bg}"
+
+radii:
+  pill: "100px"
+  card-lg: "14px"
+  card-md: "12px"
+  card-sm: "10px"
+  bar: "6px"
+  circle: "50%"
+
+components:
+  card-tinted:
+    background: "{colors.card-bg}"
+    border: "1.5px solid {colors.border}"
+    borderRadius: 14px
+    padding: "1.5rem 1.6rem"
+    
+
 1. Cover (cover)
 2. Executive synthesis (insights)
 3. Market segmentation (data)

@@ -65,7 +65,10 @@ try {
                 await fs.rm(target + '/metadata.json');
             }
         }
-        const { stdout } = await run('npm', ['pack', stage, '--ignore-scripts', '--json', '--pack-destination', scratch]);
+        const npmArgs = ['pack', stage, '--ignore-scripts', '--json', '--pack-destination', scratch];
+        const npmExecutable = process.platform === 'win32' ? 'cmd.exe' : 'npm';
+        const args = process.platform === 'win32' ? ['/d', '/c', 'npm.cmd', ...npmArgs] : npmArgs;
+        const { stdout } = await run(npmExecutable, args);
         const packed = JSON.parse(stdout)[0];
         const file = kind === 'core' ? 'dsh-ppt-0.1.1-rc.2-desktop-20260906.tgz' : 'dsh-ppt-composer-0.1.1-rc.2-desktop-20260906.tgz';
         const bytes = await fs.readFile(scratch + '/' + packed.filename);
