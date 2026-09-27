@@ -3,19 +3,25 @@ import {
   archiveFeedUrl,
   compareVersions,
   fetchAvailableReleases,
-  parseVersionIndex,
+  parseGitHubReleases,
   STABLE_FEED_URL,
   VERSION_INDEX_URL
 } from '../src/main/update/version-catalog'
 
 describe('version-catalog constants', () => {
-  it('points the stable feed and index at the dshdesktop domain', () => {
-    expect(STABLE_FEED_URL).toBe('https://dshdesktop.com/updates/latest/')
-    expect(VERSION_INDEX_URL).toBe('https://dshdesktop.com/updates/versions.json')
+  it('points the stable feed and index at the RendCore GitHub repository', () => {
+    expect(STABLE_FEED_URL).toBe(
+      'https://github.com/Glaroday/rendcore-harness/releases/latest/download/'
+    )
+    expect(VERSION_INDEX_URL).toBe(
+      'https://api.github.com/repos/Glaroday/rendcore-harness/releases?per_page=100'
+    )
   })
 
   it('builds a per-version archive feed url with a trailing slash', () => {
-    expect(archiveFeedUrl('1.2.3')).toBe('https://dshdesktop.com/updates/archive/1.2.3/')
+    expect(archiveFeedUrl('1.2.3')).toBe(
+      'https://github.com/Glaroday/rendcore-harness/releases/download/v1.2.3/'
+    )
   })
 })
 
@@ -50,36 +56,41 @@ describe('compareVersions', () => {
   })
 })
 
-describe('parseVersionIndex', () => {
-  it('keeps well-formed entries and drops the rest', () => {
-    const raw = {
-      versions: [
-        { version: '1.2.3', tag: 'v1.2.3', archiveUrl: 'https://dshdesktop.com/updates/archive/1.2.3/' },
-        { version: '', tag: 'v0', archiveUrl: 'x' },
-        { nope: true },
-        42
-      ]
-    }
-    expect(parseVersionIndex(raw)).toEqual([
-      { version: '1.2.3', tag: 'v1.2.3', archiveUrl: 'https://dshdesktop.com/updates/archive/1.2.3/' }
+describe('parseGitHubReleases', () => {
+  const feed = { name: 'latest.yml' }
+
+  it('maps tagged releases that carry an update feed and drops the rest', () => {
+    const raw = [
+      { tag_name: 'v1.2.3', assets: [feed] },
+      { tag_name: 'v1.2.0', draft: true, assets: [feed] },
+      { tag_name: 'nightly', assets: [feed] },
+      { tag_name: 'v1.1.0', assets: [{ name: 'notes.txt' }] },
+      { tag_name: '', assets: [feed] },
+      { nope: true },
+      42
+    ]
+    expect(parseGitHubReleases(raw)).toEqual([
+      {
+        version: '1.2.3',
+        tag: 'v1.2.3',
+        archiveUrl: 'https://github.com/Glaroday/rendcore-harness/releases/download/v1.2.3/'
+      }
     ])
   })
 
-  it('returns an empty array for non-objects or a missing versions array', () => {
-    expect(parseVersionIndex(null)).toEqual([])
-    expect(parseVersionIndex({})).toEqual([])
-    expect(parseVersionIndex('nope')).toEqual([])
+  it('returns an empty array for a payload that is not a release list', () => {
+    expect(parseGitHubReleases(null)).toEqual([])
+    expect(parseGitHubReleases({})).toEqual([])
+    expect(parseGitHubReleases('nope')).toEqual([])
   })
 })
 
 describe('fetchAvailableReleases', () => {
-  const index = {
-    versions: [
-      { version: '1.0.0', tag: 'v1.0.0', archiveUrl: 'a' },
-      { version: '1.2.0', tag: 'v1.2.0', archiveUrl: 'b' },
-      { version: '1.1.0', tag: 'v1.1.0', archiveUrl: 'c' }
-    ]
-  }
+  const index = [
+    { tag_name: 'v1.0.0', assets: [{ name: 'latest.yml' }] },
+    { tag_name: 'v1.2.0', assets: [{ name: 'latest.yml' }] },
+    { tag_name: 'v1.1.0', assets: [{ name: 'latest.yml' }] }
+  ]
   const ok = () =>
     Promise.resolve({ ok: true, json: () => Promise.resolve(index) } as Response)
 
