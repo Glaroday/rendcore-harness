@@ -5,6 +5,12 @@ import { parse, stringify } from 'yaml'
 
 export const RENDCORE_MODELS_ENDPOINT = 'http://43.248.102.104:18704/v1/models'
 export const RENDCORE_MODEL_CAPABILITIES_ENDPOINT = 'http://43.248.102.104:8600/api/models'
+/**
+ * The gateway refuses any request whose `max_tokens` exceeds this, regardless of
+ * the output ceiling the capability service reports for a model, so every
+ * catalog entry is clamped before it reaches the generated patch.
+ */
+export const MAX_REQUEST_TOKENS = 65_536
 const SAFE_DEFAULT_MODEL = 'gpt-5.6-sol'
 
 export interface RendCoreModel {
@@ -108,7 +114,7 @@ export function parseCapabilities(payload: unknown): RendCoreModel[] {
       id,
       name: stringValue(value.display_name ?? value.displayName ?? value.name) || id,
       contextWindow: positiveInteger(value.context ?? value.context_window ?? value.contextWindow),
-      maxTokens: positiveInteger(value.max_output ?? value.max_tokens ?? value.maxTokens),
+      maxTokens: clampRequestTokens(positiveInteger(value.max_output ?? value.max_tokens ?? value.maxTokens)),
       input,
       reasoningEfforts: parseReasoning(value.thinking ?? value.reasoning_efforts ?? value.reasoningEfforts)
     }]
@@ -156,7 +162,7 @@ function fallbackModel(id: string): RendCoreModel {
     : /gpt-5\.4-mini|gpt-5\.3-codex/.test(normalized) ? 400_000
       : /gemini/.test(normalized) ? 1_048_576
         : 1_000_000
-  const maxTokens = /gemini/.test(normalized) ? 65_536 : 128_000
+  const maxTokens = MAX_REQUEST_TOKENS
   const reasoningEfforts: Record<string, string | null> | undefined = /^gpt-5\.6-(sol|terra|luna)$/.test(normalized)
     ? { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' }
     : /^gpt-5\.(4|5)$/.test(normalized)
@@ -230,7 +236,7 @@ function normalizeStoredModelList(value: unknown): RendCoreModel[] {
       id,
       name: stringValue(model.name) || id,
       contextWindow: positiveInteger(model.contextWindow ?? model.context_window ?? model.context),
-      maxTokens: positiveInteger(model.maxTokens ?? model.max_tokens ?? model.max_output),
+      maxTokens: clampRequestTokens(positiveInteger(model.maxTokens ?? model.max_tokens ?? model.max_output)),
       input: normalizeInput(arrayOfStrings(model.input), model, id),
       reasoningEfforts: parseReasoning(model.reasoningEfforts ?? model.reasoning_efforts ?? model.thinking)
     }]
@@ -329,6 +335,7 @@ function unique(models: RendCoreModel[]): RendCoreModel[] {
   return models.filter((model, index, all) => all.findIndex((item) => item.id.toLowerCase() === model.id.toLowerCase()) === index)
 }
 function positiveInteger(value: unknown): number | undefined { return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined }
+function clampRequestTokens(value: number | undefined): number | undefined { return value === undefined ? undefined : Math.min(value, MAX_REQUEST_TOKENS) }
 function stringValue(value: unknown): string { return typeof value === 'string' ? value.trim() : '' }
 function arrayOfStrings(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [] }
 function objectValue(value: unknown): Record<string, any> | undefined { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : undefined }
