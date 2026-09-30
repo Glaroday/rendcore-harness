@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
-index a99972a..1db8b66 100644
+index f997683..e59d554 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js
 @@ -115,6 +115,22 @@ window.__ModuleLoader__.load({
@@ -42,7 +42,7 @@ index a99972a..1db8b66 100644
  			"fileContent": "Sixlwa_fileContent",
  			"fileIcon": "Sixlwa_fileIcon",
  			"fileMeta": "Sixlwa_fileMeta",
-@@ -1230,6 +1247,7 @@ window.__ModuleLoader__.load({
+@@ -1220,6 +1237,7 @@ window.__ModuleLoader__.load({
  			if (code === "ACCOUNT_SIGNED_OUT") return t("message.failure.accountSignedOut");
  			if (code === "ACCOUNT_SIGN_IN_REQUIRED") return t("message.failure.accountSignInRequired");
  			if (code === "QUOTA" || code === "ACCOUNT_QUOTA") return t("message.failure.quota");
@@ -50,7 +50,7 @@ index a99972a..1db8b66 100644
  			return code === "AUTH" ? t("message.failure.auth") : message;
  		}
  		function ModelRetryItem({ node, active, t }) {
-@@ -1336,7 +1354,7 @@ window.__ModuleLoader__.load({
+@@ -1329,7 +1347,7 @@ window.__ModuleLoader__.load({
  			});
  		}
  		/** Right-aligned bubble shared by user and steering rows. */
@@ -59,7 +59,7 @@ index a99972a..1db8b66 100644
  			const { text, attachments: contentAttachments, rest } = contentParts(content);
  			const attachments = previewAttachments ?? contentAttachments;
  			const compactImages = attachments.length > 1;
-@@ -1356,9 +1374,13 @@ window.__ModuleLoader__.load({
+@@ -1349,9 +1367,13 @@ window.__ModuleLoader__.load({
  								images: [attachment.image],
  								align: "end",
  								compact: compactImages
@@ -75,7 +75,7 @@ index a99972a..1db8b66 100644
  								children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.FileTypeIcon, {
  									path: attachment.file.name,
  									className: MessageItem_module_css_default.fileIcon
-@@ -1418,7 +1440,7 @@ window.__ModuleLoader__.load({
+@@ -1411,7 +1433,7 @@ window.__ModuleLoader__.load({
  		* @param props - the session snapshot's pending submission and render seats.
  		* @returns the echoed user bubble.
  		*/
@@ -84,7 +84,7 @@ index a99972a..1db8b66 100644
  			return (0, react_jsx_runtime.jsx)(UserStyleBubble, {
  				content: (0, react.useMemo)(() => submission.text === "" ? [] : [{
  					type: "text",
-@@ -1437,6 +1459,7 @@ window.__ModuleLoader__.load({
+@@ -1430,6 +1452,7 @@ window.__ModuleLoader__.load({
  					file: attachment.value
  				}), [submission.attachments]),
  				renderMessageImages,
@@ -92,7 +92,7 @@ index a99972a..1db8b66 100644
  				pending: submission.placement === "steering",
  				echo: true,
  				t,
-@@ -1450,7 +1473,7 @@ window.__ModuleLoader__.load({
+@@ -1443,7 +1466,7 @@ window.__ModuleLoader__.load({
  			});
  		}
  		/** User and admitted-steering keyed Chat renderer. */
@@ -101,7 +101,7 @@ index a99972a..1db8b66 100644
  			const data = node.data;
  			return (0, react_jsx_runtime.jsx)(UserStyleBubble, {
  				content: data.content,
-@@ -1459,6 +1482,7 @@ window.__ModuleLoader__.load({
+@@ -1452,6 +1475,7 @@ window.__ModuleLoader__.load({
  					openSkill
  				},
  				renderMessageImages,
@@ -134,7 +134,7 @@ index a99972a..1db8b66 100644
  				inspectCall,
  				forkAt,
  				loadImage,
-@@ -5021,6 +5047,7 @@ window.__ModuleLoader__.load({
+@@ -5108,6 +5134,7 @@ window.__ModuleLoader__.load({
  			});
  			const pendingRows = pendingInputs.map((item) => "requestId" in item ? (0, react_jsx_runtime.jsx)(PendingSubmissionBubble, {
  				submission: item,
@@ -142,7 +142,7 @@ index a99972a..1db8b66 100644
  				renderMessageImages: seatProps.renderMessageImages,
  				t: seatProps.t
  			}, item.requestId) : (0, react_jsx_runtime.jsx)(PendingSteeringBubble, {
-@@ -5040,7 +5067,7 @@ window.__ModuleLoader__.load({
+@@ -5127,7 +5154,7 @@ window.__ModuleLoader__.load({
  		* The chat view slot entry: pure component over the composed props; each
  		* ordered business Node crosses the keyed renderer seat.
  		*/
@@ -151,7 +151,7 @@ index a99972a..1db8b66 100644
  			const order = useChat((s) => s.order);
  			const groupedEntries = useConversation((snapshot) => snapshot.views.grouped("chat")?.entries);
  			const entries = (0, react.useMemo)(() => groupedEntries ?? order.map((key) => ({
-@@ -5082,11 +5109,29 @@ window.__ModuleLoader__.load({
+@@ -5174,11 +5201,29 @@ window.__ModuleLoader__.load({
  					if (id !== fileOpenRequest.current) return;
  					setFileOpenError({
  						path,
@@ -181,15 +181,15 @@ index a99972a..1db8b66 100644
  			const closeFileOpenError = (0, react.useCallback)(() => {
  				fileOpenRequest.current += 1;
  				setFileOpenError(null);
-@@ -5209,6 +5254,7 @@ window.__ModuleLoader__.load({
+@@ -5301,6 +5346,7 @@ window.__ModuleLoader__.load({
  											renderMessageImages,
  											fileMentions,
  											renderSlot,
 +											onOpenUploadedFile: requestOpenUploadedFile,
  											t
  										})
- 									})
-@@ -5231,7 +5277,7 @@ window.__ModuleLoader__.load({
+ 									}),
+@@ -5327,7 +5373,7 @@ window.__ModuleLoader__.load({
  						busy: fileOpenBusy,
  						onClose: closeFileOpenError,
  						onRetry: () => {
@@ -198,7 +198,7 @@ index a99972a..1db8b66 100644
  						},
  						t
  					})
-@@ -5426,7 +5472,8 @@ window.__ModuleLoader__.load({
+@@ -5522,7 +5568,8 @@ window.__ModuleLoader__.load({
  			"message.accountStopped": "任务已停止",
  			"message.failure.accountSignedOut": "任务已因退出 DeepSeek 登录而停止。",
  			"message.failure.accountSignInRequired": "请先登录 DeepSeek，并确认请求地址支持账号认证。",
@@ -208,7 +208,7 @@ index a99972a..1db8b66 100644
  			"message.turnError": "本轮运行失败",
  			"message.maxTokens": "已达到输出 token 上限",
  			"message.maxTokens.hint": "回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。",
-@@ -5615,7 +5662,8 @@ window.__ModuleLoader__.load({
+@@ -5711,7 +5758,8 @@ window.__ModuleLoader__.load({
  			"message.accountStopped": "Task stopped",
  			"message.failure.accountSignedOut": "Stopped because you signed out of DeepSeek.",
  			"message.failure.accountSignInRequired": "Sign in to DeepSeek and ensure the request destination supports account authentication.",
@@ -218,7 +218,7 @@ index a99972a..1db8b66 100644
  			"message.turnError": "This turn failed",
  			"message.maxTokens": "Output token limit reached",
  			"message.maxTokens.hint": "The reply was cut off; earlier output is preserved in the conversation. Send \"continue\" to let the model resume.",
-@@ -12178,7 +12226,8 @@ window.__ModuleLoader__.load({
+@@ -12265,7 +12313,8 @@ window.__ModuleLoader__.load({
  			"configForms",
  			"remote",
  			"remote.session",
@@ -228,10 +228,10 @@ index a99972a..1db8b66 100644
  		];
  		/**
  		* Mount all Chat-owned contributions.
-@@ -12268,6 +12317,14 @@ window.__ModuleLoader__.load({
+@@ -12355,6 +12404,14 @@ window.__ModuleLoader__.load({
  				}, LinkOpeningRow));
  			});
- 			const transcriptView = new TranscriptViewPolicy(chatSettings);
+ 			const transcriptView = new TranscriptViewPolicy(chatSettings, "dshDesktop" in globalThis ? "standard" : DEFAULT_TRANSCRIPT_VIEW_MODE);
 +			ctx.provide("openUploadedAttachment", { open: async (sessionId, attachmentId) => {
 +				const binding = ctx.sessions.binding(sessionId);
 +				if (binding === void 0) throw new Error(`ui-chat: unknown session "${sessionId}"`);
@@ -243,7 +243,7 @@ index a99972a..1db8b66 100644
  			const presentation = derivePresentationPolicy(transcriptView.mode);
  			const performancePolicy = new PerformanceUsagePolicy(chatSettings);
  			ctx.effect(() => () => {
-@@ -12335,10 +12392,22 @@ window.__ModuleLoader__.load({
+@@ -12422,10 +12479,22 @@ window.__ModuleLoader__.load({
  							fileMentions: (owner) => ctx.get("chatFileMentions")?.forClosing(owner, sessionId),
  							openFile: async (path, options) => {
  								const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd;
