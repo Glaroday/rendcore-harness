@@ -2068,6 +2068,60 @@ describe('workbench market screenshot and metadata display', () => {
     return calls
   }
 
+  it('sorts market cards by visible stars, downloads, update time and name without changing the default order', async () => {
+    const { service } = await fixture()
+    service.remoteCatalog = [
+      listed({ id: 'o/zulu', name: 'Zulu', metrics: { githubStars: { value: 2 }, npmDownloads30d: { value: 8 } }, updatedAt: '2026-01-02T00:00:00Z' }),
+      listed({ id: 'o/alpha', name: 'Alpha', metrics: { githubStars: { value: 9 }, npmDownloads30d: { value: 3 } }, updatedAt: '2026-03-02T00:00:00Z' }),
+      listed({ id: 'o/bravo', name: 'Bravo', metrics: { githubStars: { value: 9 }, npmDownloads30d: { value: 3 } }, updatedAt: '2026-02-02T00:00:00Z' }),
+      listed({ id: 'o/missing', name: 'No metrics', updatedAt: 'invalid' })
+    ]
+    service.publish()
+    const ui = interactiveMarket(service)
+    const cards = () => ui.find(ui.render(), node => node.type === 'article').map(node => node.props.key)
+    const sort = (value) => {
+      const select = ui.find(ui.render(), node => node.type === 'select' && node.props['aria-label'] === '工作台排序方式')[0]
+      expect(select.props.value).toBeDefined()
+      expect(select.props.children.map(option => option.props.value)).toEqual(['default', 'stars', 'downloads', 'updated', 'name'])
+      select.props.onChange({ target: { value } })
+    }
+    expect(cards()).toEqual(['o/zulu', 'o/alpha', 'o/bravo', 'o/missing'])
+    sort('stars')
+    expect(cards()).toEqual(['o/alpha', 'o/bravo', 'o/zulu', 'o/missing'])
+    sort('downloads')
+    expect(cards()).toEqual(['o/zulu', 'o/alpha', 'o/bravo', 'o/missing'])
+    sort('updated')
+    expect(cards()).toEqual(['o/alpha', 'o/bravo', 'o/zulu', 'o/missing'])
+    sort('name')
+    expect(cards()).toEqual(['o/alpha', 'o/bravo', 'o/missing', 'o/zulu'])
+    sort('default')
+    expect(cards()).toEqual(['o/zulu', 'o/alpha', 'o/bravo', 'o/missing'])
+  })
+
+  it('keeps sorting active while searching, filtering categories and switching collections', async () => {
+    const { service } = await fixture({ ...emptyState(), added: ['o/a', 'o/b'], favorites: ['o/a', 'o/b'] })
+    service.remoteCatalog = [
+      listed({ id: 'o/a', name: 'Alpha', categoryName: '效率', metrics: { githubStars: { value: 1 } } }),
+      listed({ id: 'o/b', name: 'Beta', categoryName: '内容', metrics: { githubStars: { value: 5 } } }),
+      listed({ id: 'o/c', name: 'Charlie', categoryName: '效率', metrics: { githubStars: { value: 9 } } })
+    ]
+    service.publish()
+    const ui = interactiveMarket(service)
+    const cards = () => ui.find(ui.render(), node => node.type === 'article').map(node => node.props.key)
+    const node = predicate => ui.find(ui.render(), predicate)[0]
+    node(item => item.type === 'select' && item.props['aria-label'] === '工作台排序方式').props.onChange({ target: { value: 'stars' } })
+    expect(cards()).toEqual(['o/c', 'o/b', 'o/a'])
+    node(item => item.type === 'button' && item.props.className === 'dshWbCategoryFilter' && item.props.children[0] === '效率').props.onClick()
+    expect(cards()).toEqual(['o/c', 'o/a'])
+    node(item => item.type === 'input' && item.props['aria-label'] === '搜索工作台').props.onChange({ target: { value: 'Alpha' } })
+    expect(cards()).toEqual(['o/a'])
+    node(item => item.type === 'input' && item.props['aria-label'] === '搜索工作台').props.onChange({ target: { value: '' } })
+    node(item => item.props?.id === 'dsh-workbench-favorites-tab').props.onClick()
+    expect(cards()).toEqual(['o/b', 'o/a'])
+    node(item => item.props?.id === 'dsh-workbench-mine-tab').props.onClick()
+    expect(cards()).toEqual(['o/b', 'o/a', 'writer', 'research'])
+  })
+
   it('opens details from the screenshot while favorite remains a separate action', async () => {
     const { service } = await fixture()
     service.remoteCatalog = [listed()]

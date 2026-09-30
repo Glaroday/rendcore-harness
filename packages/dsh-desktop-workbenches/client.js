@@ -979,6 +979,8 @@ window.__ModuleLoader__.load({
       .dshWbSearch{position:relative;min-width:220px;max-width:320px;flex:1}.dshWbSearch svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--dsw-alias-label-secondary);pointer-events:none}
       .dshWbSearch input{display:block;width:100%;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:7px 11px 7px 34px;background:var(--dsw-alias-bg-layer-1)}
       .dshWbCategories{display:flex;align-items:center;gap:6px;overflow:auto;padding:2px;scrollbar-width:none}.dshWbCategories::-webkit-scrollbar{display:none}
+      .dshWbSort{display:flex;align-items:center;gap:8px;margin-left:auto;white-space:nowrap;color:var(--dsw-alias-label-secondary);font-size:12px}
+      .dshWbSort select{min-width:110px;max-width:100%;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:7px 9px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;cursor:pointer}
       .dshWb .dshWbCategoryFilter{border:0;background:transparent;border-radius:999px;padding:5px 10px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
       .dshWb .dshWbCategoryFilter:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}.dshWb .dshWbCategoryFilter[aria-pressed=true]{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-label-primary-foreground)}
       .dshWbSubmit{margin:0;padding:24px;border:1px solid var(--dsw-alias-border-l2);border-radius:9px;background:var(--dsw-alias-bg-layer-1)}
@@ -1500,12 +1502,32 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
           result && h('p', null, h('strong', null, `#${result.number} ${result.title}`), h('br'), SUBMISSION_STATUS_TEXT[result.status] || result.status, ' ',
             h('a', { href: result.url, target: '_blank', rel: 'noopener noreferrer' }, '在 GitHub 查看'))))
     }
+    function sortMarketEntries(entries, sortBy) {
+      if (sortBy === 'default') return entries
+      const valueFor = (entry) => {
+        if (sortBy === 'stars') return metricValue(entry.metrics?.githubStars?.value, entry.githubStars)
+        if (sortBy === 'downloads') return metricValue(entry.metrics?.npmDownloads30d?.value, entry.metrics?.githubReleaseDownloads?.value, entry.installations, entry.installCount)
+        if (sortBy === 'updated') {
+          const timestamp = typeof entry.updatedAt === 'string' ? Date.parse(entry.updatedAt) : NaN
+          return Number.isFinite(timestamp) ? timestamp : undefined
+        }
+        return typeof entry.title === 'string' && entry.title.trim() ? entry.title.trim() : undefined
+      }
+      return entries.map((entry, index) => ({ entry, index, value: valueFor(entry) })).sort((left, right) => {
+        if (left.value === undefined || right.value === undefined) return left.value === undefined ? (right.value === undefined ? left.index - right.index : 1) : -1
+        const order = sortBy === 'name'
+          ? left.value.localeCompare(right.value, 'zh-CN', { numeric: true })
+          : right.value - left.value
+        return order || left.index - right.index
+      }).map(({ entry }) => entry)
+    }
     function Market({ service }) {
       const { state, catalog, categories: marketCategories = [], ready, pending, installs, installing, catalogRefreshing, checkingUpdates, native, togglingPlugin, removingPlugin, removedWorkbenchIds = [] } = useWorkbench(service)
       const workbenchEnabled = React.useSyncExternalStore(workbenchPreference.subscribe.bind(workbenchPreference), workbenchPreference.getSnapshot.bind(workbenchPreference))
       const [tab, setTab] = React.useState('market')
       const [search, setSearch] = React.useState('')
       const [category, setCategory] = React.useState('全部')
+      const [sortBy, setSortBy] = React.useState('default')
       const [detail, setDetail] = React.useState(null)
       const [removing, setRemoving] = React.useState(null)
       const [openPrompt, setOpenPrompt] = React.useState(null)
@@ -1530,7 +1552,7 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
           : tab === 'market' ? marketEntries : []
       const categories = ['全部', ...new Set(allEntries.map((entry) => entry.category || '其他'))]
       const query = search.toLowerCase().trim()
-      const entries = allEntries.filter((entry) => (category === '全部' || (entry.category || '其他') === category) && `${entry.title || ''} ${entry.description || ''} ${entry.author || ''} ${entry.category || ''}`.toLowerCase().includes(query))
+      const entries = sortMarketEntries(allEntries.filter((entry) => (category === '全部' || (entry.category || '其他') === category) && `${entry.title || ''} ${entry.description || ''} ${entry.author || ''} ${entry.category || ''}`.toLowerCase().includes(query)), sortBy)
       const selected = allEntries.find((entry) => (entry.catalogId || entry.id) === detail)
       const removingEntry = allEntries.find((entry) => entry.id === removing) || catalog.find((entry) => entry.id === removing)
       const selectCollection = (value) => { setTab(value); setCategory('全部'); setDetail(null) }
@@ -1568,7 +1590,13 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
             h(Button, { id: 'dsh-workbench-mine-tab', role: 'tab', tabIndex: tab === 'mine' ? 0 : -1, 'aria-selected': tab === 'mine', 'aria-controls': 'dsh-workbench-mine-panel', onKeyDown: navigateCollections, onClick: () => selectCollection('mine') }, `已安装 (${installedEntries.length})`))),
           h('div', { className: 'dshWbBrowseTools' },
             h('label', { className: 'dshWbSearch' }, h(MarketIcon, { name: 'search' }), h('input', { type: 'search', placeholder: '搜索名称、作者或分类', 'aria-label': '搜索工作台', value: search, onChange: (event) => setSearch(event.target.value) })),
-            h('div', { className: 'dshWbCategories', role: 'group', 'aria-label': '按分类筛选' }, categories.map((value) => h('button', { key: value, type: 'button', className: 'dshWbCategoryFilter', 'aria-pressed': category === value, onClick: () => setCategory(value) }, value))))),
+            h('div', { className: 'dshWbCategories', role: 'group', 'aria-label': '按分类筛选' }, categories.map((value) => h('button', { key: value, type: 'button', className: 'dshWbCategoryFilter', 'aria-pressed': category === value, onClick: () => setCategory(value) }, value))),
+            h('label', { className: 'dshWbSort' }, '排序', h('select', { 'aria-label': '工作台排序方式', value: sortBy, onChange: (event) => setSortBy(event.target.value) },
+              h('option', { value: 'default' }, '市场顺序'),
+              h('option', { value: 'stars' }, 'Star 数量'),
+              h('option', { value: 'downloads' }, '下载量'),
+              h('option', { value: 'updated' }, '更新时间'),
+              h('option', { value: 'name' }, '名称'))))),
         tab === 'submit' && h('section', { id: 'dsh-workbench-submit-panel', className: 'dshWbSubmit', 'aria-label': '制作我的工作台', tabIndex: 0 },
           h('div', { className: 'dshWbSteps', 'aria-label': '工作台制作步骤' },
             h('div', { className: 'dshWbStep' },
