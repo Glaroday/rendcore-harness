@@ -57,7 +57,6 @@ import {
 import {
   disableProfilePlugin,
   enableProfilePlugin,
-  forgetMarketDisable,
   listDisabledProfilePlugins
 } from './state/plugin-disable'
 import {
@@ -92,8 +91,7 @@ import { desktopResourceUrl, installDesktopProtocol, registerDesktopScheme, SAFE
 import { ensureLaunchRoot } from './state/launch-root'
 import {
   listInstalledProfilePlugins,
-  pruneUnresolvableProfileBundles,
-  resetPluginProfile
+  pruneUnresolvableProfileBundles
 } from './state/plugin-recovery'
 import { ensureSafeModeProfile, SAFE_MODE_PROFILE } from './state/safe-mode-profile'
 import { migrateLegacyAgentPresets } from './state/legacy-preset-migration'
@@ -1180,8 +1178,18 @@ async function showSplash(): Promise<void> {
  * files, user patch rows or plugin data, and runs while Harness is stopped.
  */
 async function reportProfileConsistency(dshHome: string): Promise<void> {
+  let pendingRemovals: string[] = []
   try {
-    const healed = await healProfileBundles(dshHome, HOST_COMPOSED_BUNDLES)
+    pendingRemovals = await listPendingPluginRemovals(dshHome)
+  } catch (error) {
+    // An unreadable ledger already blocks normal startup maintenance; healing
+    // then only has host-composed layers to reconcile.
+    runtime.note(`[desktop] pending plugin removals unreadable during bundle healing: ${
+      error instanceof Error ? error.message : String(error)
+    }`)
+  }
+  try {
+    const healed = await healProfileBundles(dshHome, HOST_COMPOSED_BUNDLES, pendingRemovals)
     if (healed.removed.length > 0) {
       runtime.note(`[desktop] removed duplicate host-composed bundle layer(s): ${healed.removed.join(', ')}; packages and user patches kept`)
     }
@@ -1199,7 +1207,7 @@ async function reportProfileConsistency(dshHome: string): Promise<void> {
   // Defer heavy recursive inspections of the profiles directory and package store
   // so they run asynchronously without blocking the startup launch pipeline.
   void Promise.all([
-    inspectProfileConsistency(dshHome, HOST_COMPOSED_BUNDLES),
+    inspectProfileConsistency(dshHome, HOST_COMPOSED_BUNDLES, pendingRemovals),
     inspectStoreConsistency(dshHome)
   ])
     .then(([findings, store]) => {
@@ -2580,11 +2588,6 @@ async function removeProfilePluginCompletely(
   for (const failure of result.failures) {
     runtime.note(`[${logPrefix}] ${pluginName} remains disabled; cleanup pending: ${failure}`)
   }
-  if (result.disabled) {
-    await forgetMarketDisable(dshHome, pluginName).catch((error: unknown) => {
-      runtime.note(`[${logPrefix}] could not clear the market disable entry for ${pluginName}: ${String(error)}`)
-    })
-  }
   return result
 }
 
@@ -3503,17 +3506,6 @@ async function bootstrap(): Promise<void> {
     await launchHarness()
     void mobileBridge.start().catch(showUnexpectedError)
     return { ok: true }
-  })
-  ipcMain.removeHandler('harness:reset-plugins')
-  ipcMain.handle('harness:reset-plugins', async (event, pluginName?: unknown) => {
-    assertTrustedMainWindowEvent(event)
-    if (pluginName !== undefined && typeof pluginName !== 'string') {
-      throw new Error('The failing plugin name must be a string.')
-    }
-    const dshHome = join(app.getPath('userData'), 'harness')
-    await resetPluginProfile(dshHome, pluginName)
-    await launchHarness()
-    return { ok: runtime.snapshot().phase === 'ready' }
   })
   installMenu()
   if (startInSafeMode) {
