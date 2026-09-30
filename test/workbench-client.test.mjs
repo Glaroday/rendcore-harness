@@ -721,11 +721,19 @@ describe('desktop workbench client navigation', () => {
     const cleanup = styleEffect()
     cleanup?.()
     expect(styles).toHaveLength(1)
+    expect(styles[0].dataset.plugin).toBe('dsh-desktop-workbenches')
     expect(styles[0].textContent).toContain('.dshWbWorkbenchHome')
     expect(styles[0].textContent).toContain('height:232px;flex:0 0 232px')
     expect(styles[0].textContent).toContain('-webkit-line-clamp:4')
     styleEffect()
     expect(styles).toHaveLength(1)
+    styles[0].dataset.plugin = 'another-plugin'
+    styleEffect()
+    expect(styles[0].dataset.plugin).toBe('dsh-desktop-workbenches')
+    styles[0].remove()
+    styleEffect()
+    expect(styles).toHaveLength(1)
+    expect(styles[0].dataset.plugin).toBe('dsh-desktop-workbenches')
   })
 
   it('restores workbench styles after head changes without a React rerender and stops observing on disposal', async () => {
