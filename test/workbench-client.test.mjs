@@ -1746,7 +1746,7 @@ describe('workbench market screenshot and metadata display', () => {
   const fullSource = code
   it('explains the workbench concept and the sidebar shortcut model', () => {
     expect(fullSource).toContain("tab === 'submit' ? '制作属于你的工作台' : '工作台'")
-    expect(fullSource).toContain('工作台把专属界面、会话和资料组织在一起。可通过顶部快捷栏在原生会话与不同工作台之间切换。')
+    expect(fullSource).toContain('工作台把专属界面、会话和资料组织在一起。可通过顶部快捷栏在会话与不同工作台之间切换。')
   })
 
   it('does not embed provider-specific market screenshots in Desktop', async () => {
@@ -1769,13 +1769,13 @@ describe('workbench market screenshot and metadata display', () => {
   it('renders a persistent Workbench home area beside the current mode and switch button', () => {
     expect(fullSource).toContain('function WorkbenchSidebarSwitcher({ service, wide, startSession, usePanelInfo })')
     expect(fullSource).toContain("'data-dsh-workbench-switcher': ''")
-    expect(fullSource).toContain("className: 'dshWbModeSwitch', title: `切换工作台（当前：${active?.title || '默认'}）`, 'aria-label': `切换工作台，当前：${active?.title || '默认'}`, 'aria-haspopup': 'menu', 'aria-expanded': open")
+    expect(fullSource).toContain("className: 'dshWbModeSwitch', title: `切换工作台（当前：${active?.title || '会话'}）`, 'aria-label': `切换工作台，当前：${active?.title || '会话'}`, 'aria-haspopup': 'menu', 'aria-expanded': open")
     expect(fullSource).toContain("role: 'menu', 'aria-label': '选择会话模式'")
     expect(fullSource).toContain("role: 'menuitemradio'")
     expect(fullSource).toContain('service.openNative(startSession)')
     expect(fullSource).toContain("name: 'home'")
     expect(fullSource).not.toContain('dshWbSidebarTooltip')
-    expect(fullSource).toContain("active?.title || '默认'")
+    expect(fullSource).toContain("active?.title || '会话'")
     expect(fullSource).toContain("title: '工作台主页', 'aria-label': '打开工作台主页'")
     expect(fullSource).toContain('setOpen(false); service.showMarket()')
     expect(fullSource).toContain('.dshWbWorkbenchHome{display:flex;align-items:center;justify-content:flex-start;gap:8px;flex:1 1 0;min-width:88px;')
@@ -1820,6 +1820,7 @@ describe('workbench market screenshot and metadata display', () => {
     expect(ui.find(tree, node => node.props?.role === 'menu')).toHaveLength(1)
     const modes = ui.find(tree, node => node.props?.role === 'menuitemradio')
     expect(modes).toHaveLength(2)
+    expect(ui.find(modes[0], node => node.props?.className === 'dshWbModeOptionLabel')[0].props.children).toEqual(['会话'])
     expect(modes.map(mode => mode.props['aria-checked'])).toEqual([false, true])
     modes[0].props.onClick()
     expect(ui.service.openNative).toHaveBeenCalledOnce()
@@ -1833,10 +1834,11 @@ describe('workbench market screenshot and metadata display', () => {
     expect(ui.find(tree, node => node.props?.role === 'menu')).toHaveLength(0)
   })
 
-  it('shows Default without a switch button when no Workbench is pinned', () => {
+  it('shows 会话 without a switch button when no Workbench is pinned', () => {
     const ui = sidebarSwitcher()
     const tree = ui.render()
-    expect(ui.find(tree, node => node.props?.className === 'dshWbCurrentModeLabel')[0].props.children).toEqual(['默认'])
+    expect(ui.find(tree, node => node.props?.className === 'dshWbCurrentModeLabel')[0].props.children).toEqual(['会话'])
+    expect(ui.find(tree, node => node.props?.className === 'dshWbCurrentMode')[0].props['aria-label']).toBe('当前模式：会话')
     expect(ui.find(tree, node => node.props?.className === 'dshWbModeSwitch')).toHaveLength(0)
     expect(ui.find(tree, node => node.props?.className === 'dshWbWorkbenchHome')).toHaveLength(1)
     expect(code).not.toContain('.dshWbCurrentModeIcon{')
