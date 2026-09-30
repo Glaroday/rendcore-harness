@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory() as work:
         assert [e[0] for e in events] == ['upload', 'verify', 'notify']
         assert events[0][1] == 'test/1.0.0-test.1/42/dsh-desktop-windows-x64-setup.exe'
         assert events[2][1] == {'test_build': True}
-        assert 'Windows x64' in (directory / 'summary').read_text()
+        assert 'Windows x64' in (directory / 'summary').read_text(encoding='utf-8')
         notify.reset_mock()
         api.upload_file.side_effect = RuntimeError('upload failed')
         try:
