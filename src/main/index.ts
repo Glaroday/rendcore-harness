@@ -89,6 +89,7 @@ import { secureWindow } from './security'
 import { SafeModeFrame } from './safe-mode-frame'
 import { desktopResourceUrl, installDesktopProtocol, registerDesktopScheme, SAFE_MODE_PAGE } from './desktop-protocol'
 import { ensureLaunchRoot } from './state/launch-root'
+import { forgetRemovedWorkbenchMarketInstall } from './state/workbench-market-recovery'
 import {
   listInstalledProfilePlugins,
   pruneUnresolvableProfileBundles
@@ -2587,6 +2588,9 @@ async function removeProfilePluginCompletely(
   })
   for (const failure of result.failures) {
     runtime.note(`[${logPrefix}] ${pluginName} remains disabled; cleanup pending: ${failure}`)
+  }
+  if (result.removed) {
+    await forgetRemovedWorkbenchMarketInstall(dshHome, pluginName, (message) => runtime.note(`[${logPrefix}] ${message}`))
   }
   return result
 }
