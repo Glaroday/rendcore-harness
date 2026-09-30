@@ -20,8 +20,16 @@ const sessionStorage = {
   removeItem: key => sessionValues.delete(key),
   clear: () => sessionValues.clear()
 }
+// The Workbench feature is off by default; these behavior tests run as a user
+// who switched it on. The default itself is covered by its own test.
+const WORKBENCH_ENABLED = 'dsh-workbench-enabled'
+const enabledStorage = {
+  getItem: key => key === WORKBENCH_ENABLED ? 'true' : null,
+  setItem: () => {},
+  removeItem: () => {}
+}
 const clientWindow = { sessionStorage, localStorage: {
-  getItem: key => sessionValues.has(key) ? sessionValues.get(key) : null,
+  getItem: key => sessionValues.has(key) ? sessionValues.get(key) : key === WORKBENCH_ENABLED ? 'true' : null,
   setItem: (key, value) => sessionValues.set(key, String(value)),
   removeItem: key => sessionValues.delete(key)
 }, __ModuleLoader__: { load({ factory }) {
@@ -61,7 +69,7 @@ function marketCard(service, tab = 'market') {
     useLayoutEffect: () => {},
     useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot()
   }
-  vm.runInNewContext(code, { window: { sessionStorage, __ModuleLoader__: { load({ factory }) {
+  vm.runInNewContext(code, { window: { sessionStorage, localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
     renderMarket = factory(name => name === 'react' ? testReact : name === '@deepseek-ai/cordis' ? { Service } : { Switch: () => null }).Market
   } } }, document, setTimeout, clearTimeout, AbortController })
   const tree = renderMarket({ service })
@@ -101,7 +109,7 @@ function interactiveMarket(service, tab = 'market') {
     useLayoutEffect: () => {},
     useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot()
   }
-  vm.runInNewContext(code, { window: { sessionStorage, __ModuleLoader__: { load({ factory }) {
+  vm.runInNewContext(code, { window: { sessionStorage, localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
     renderMarket = factory(name => name === 'react' ? testReact : name === '@deepseek-ai/cordis' ? { Service } : { Switch: () => null }).Market
   } } }, document, setTimeout, clearTimeout, AbortController })
   const find = (node, predicate) => {
@@ -705,7 +713,7 @@ describe('desktop workbench client navigation', () => {
       head: { appendChild: style => styles.push(style) }
     }
     let applyLocal
-    vm.runInNewContext(code, { window: { sessionStorage, __ModuleLoader__: { load({ factory }) {
+    vm.runInNewContext(code, { window: { sessionStorage, localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
       applyLocal = factory(name => name === 'react' ? { createElement() {}, Component: class {} } : name === '@deepseek-ai/cordis' ? { Service } : { Switch: () => null }).apply
     } } }, document: testDocument, setTimeout, clearTimeout, AbortController })
     let styleEffect
@@ -724,7 +732,7 @@ describe('desktop workbench client navigation', () => {
     const { JSDOM } = await import('jsdom')
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>')
     let applyLocal
-    vm.runInNewContext(code, { window: { __ModuleLoader__: { load({ factory }) {
+    vm.runInNewContext(code, { window: { localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
       applyLocal = factory(name => name === 'react' ? { createElement() {}, Component: class {} } : name === '@deepseek-ai/cordis' ? { Service } : { Switch: () => null }).apply
     } } }, document: dom.window.document, MutationObserver: dom.window.MutationObserver, setTimeout, clearTimeout, AbortController })
     let styleEffect
@@ -976,7 +984,7 @@ describe('desktop workbench client navigation', () => {
       useCallback: callback => callback,
       useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}]
     }
-    vm.runInNewContext(code, { document: { createElement: () => ({ style: {} }) }, window: { __ModuleLoader__: { load({ factory }) {
+    vm.runInNewContext(code, { document: { createElement: () => ({ style: {} }) }, window: { localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
       Frame = factory((name) => name === 'react-dom' ? { createPortal: (node) => ({ children: [node] }) } : name === '@deepseek-ai/cordis' ? { Service } : react).Frame
     } } } })
     const { service, ctx, list } = await fixture()
@@ -1017,7 +1025,7 @@ describe('desktop workbench client navigation', () => {
       useCallback: callback => callback,
       useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}]
     }
-    vm.runInNewContext(code, { document: { createElement: () => ({ style: {} }) }, window: { __ModuleLoader__: { load({ factory }) {
+    vm.runInNewContext(code, { document: { createElement: () => ({ style: {} }) }, window: { localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
       Frame = factory((name) => name === 'react-dom' ? { createPortal: (node) => ({ children: [node] }) } : name === '@deepseek-ai/cordis' ? { Service } : react).Frame
     } } } })
     const initial = emptyState()
@@ -1155,7 +1163,7 @@ describe('desktop workbench client navigation', () => {
     let root
     try {
       let Frame
-      vm.runInNewContext(code, { document: dom.window.document, window: { __ModuleLoader__: { load({ factory }) {
+      vm.runInNewContext(code, { document: dom.window.document, window: { localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
       Frame = factory(name => name === 'react-dom' ? ReactDOM : name === '@deepseek-ai/cordis' ? { Service } : React).Frame
       } } } })
       const { service, ctx } = await fixture(boundState())
@@ -1229,7 +1237,7 @@ describe('desktop workbench client navigation', () => {
       ${code}
     `, {
       fetchReply: reply,
-      window: { __ModuleLoader__: { load({ factory }) {
+      window: { localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
         BrowserWorkbenches = factory(name => name === '@deepseek-ai/cordis' ? { Service } : { createElement() {}, Component: class {} }).Workbenches
       } } }
     })
@@ -1262,7 +1270,7 @@ describe('desktop workbench client navigation', () => {
         return getSnapshot()
       }
     }
-    vm.runInNewContext(code, { document: { createElement: () => ({ style: {} }) }, window: { __ModuleLoader__: { load({ factory }) { Frame = factory((name) => name === 'react-dom' ? { createPortal: (node) => ({ children: [node] }) } : name === '@deepseek-ai/cordis' ? { Service } : React).Frame } } } })
+    vm.runInNewContext(code, { document: { createElement: () => ({ style: {} }) }, window: { localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) { Frame = factory((name) => name === 'react-dom' ? { createPortal: (node) => ({ children: [node] }) } : name === '@deepseek-ai/cordis' ? { Service } : React).Frame } } } })
     const { service, ctx } = await fixture(boundState())
     registerProvider(service, ctx, 'dock', { title: 'Dock', customFrame: true })
     await service.add('dock')
@@ -2665,5 +2673,40 @@ describe('sidebar central panel selection', () => {
     expect(home().props['aria-current']).toBeUndefined()
     ui.selectPanel('desktop-workbenches')
     expect(home().props['aria-current']).toBe('page')
+  })
+})
+
+describe('workbench feature default', () => {
+  function loadWorkbenches(stored) {
+    const values = new Map(stored === undefined ? [] : [[WORKBENCH_ENABLED, stored]])
+    let FreshWorkbenches
+    vm.runInNewContext(code, {
+      window: {
+        sessionStorage,
+        localStorage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key) },
+        __ModuleLoader__: { load({ factory }) {
+          FreshWorkbenches = factory(name => name === '@deepseek-ai/cordis' ? { Service } : { createElement() {}, Component: class {}, Switch: () => null }).Workbenches
+        } }
+      },
+      document, setTimeout, clearTimeout, AbortController
+    })
+    return FreshWorkbenches
+  }
+
+  async function openError(stored) {
+    const { ctx } = await fixture(boundState())
+    const service = new (loadWorkbenches(stored))(ctx)
+    try {
+      await service.open('research')
+      return undefined
+    } catch (error) {
+      return error.message
+    }
+  }
+
+  it('keeps workbenches off until the user switches the feature on', async () => {
+    expect(await openError(undefined)).toBe('工作台功能已关闭。')
+    expect(await openError('false')).toBe('工作台功能已关闭。')
+    expect(await openError('true')).not.toBe('工作台功能已关闭。')
   })
 })
