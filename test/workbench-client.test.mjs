@@ -2282,17 +2282,68 @@ describe('workbench market screenshot and metadata display', () => {
     expect(ui.find(card, node => node.props?.className === 'dshWbInstalled')).toHaveLength(0)
   })
 
-  it('uses native inventory after uninstall even when a market install record remains', async () => {
+  it('treats an old market record as uninstalled when native inventory confirms removal', async () => {
     const { service, ctx } = await fixture({ ...emptyState(), added: ['o/helper'] })
     service.remoteCatalog = [listed()]
     service.installs = { 'o/helper': { catalogId: 'o/helper', pluginName: 'helper', version: '1.0.0' } }
     ctx.remote = { pluginManager: { listBundles: vi.fn(async () => ({ ok: true, value: [] })) } }
     await service.refreshNative()
+    expect(service.marketInstallFor('o/helper')).toBeNull()
+    expect(service.installedVersionFor(service.getSnapshot().catalog[0])).toBeUndefined()
+    expect(service.getSnapshot().catalog[0].loadFailure).toBe('')
     const ui = interactiveMarket(service)
     const card = ui.find(ui.render(), node => node.type === 'article')[0]
     expect(ui.find(card, node => node.props?.className === 'dshWbInstalled')).toHaveLength(0)
-    expect(ui.find(card, node => node.props?.className === 'dshWbInstalled dshWbInstallFailed')).toHaveLength(1)
-    expect(ui.find(card, node => node.props?.className === 'dshWbRetry')).toHaveLength(1)
+    expect(ui.find(card, node => node.props?.className === 'dshWbFailureHint')).toHaveLength(0)
+    expect(cardButtons(card)).toContain('安装')
+    expect(ui.find(ui.render(), node => node.type === 'article' && node.props.key === 'o/helper')).toHaveLength(1)
+    const mine = interactiveMarket(service, 'mine')
+    const stale = mine.find(mine.render(), node => node.type === 'article' && node.props.key === 'o/helper')[0]
+    expect(stale).toBeDefined()
+    expect(mine.find(stale, node => node.props?.className === 'dshWbUninstall')[0].props['aria-label']).toBe('移除残留记录Helper')
+  })
+
+  it('forgets a stale market install before clearing the sidebar record', async () => {
+    const { service, ctx, saved } = await fixture({ ...emptyState(), added: ['o/helper'], pinned: ['o/helper'] })
+    service.remoteCatalog = [listed()]
+    service.installs = { 'o/helper': { catalogId: 'o/helper', pluginName: 'helper', version: '1.0.0' } }
+    ctx.remote = { pluginManager: { listBundles: vi.fn(async () => ({ ok: true, value: [] })) } }
+    await service.refreshNative()
+    let rejectRemoval = true
+    const calls = withMarket(service, { '/api/desktop-workbenches/market-uninstall': () => rejectRemoval
+      ? Response.json({ error: 'Unable to forget record' }, { status: 500 })
+      : Response.json({ restartRequired: false }) })
+    await expect(service.removeStaleWorkbenchRecord('o/helper')).rejects.toThrow('Unable to forget record')
+    expect(saved().state.added).toContain('o/helper')
+    expect(service.installs['o/helper']).toBeDefined()
+    rejectRemoval = false
+    await service.removeStaleWorkbenchRecord('o/helper')
+    expect(calls).toEqual(['/api/desktop-workbenches/market-uninstall', '/api/desktop-workbenches/market-uninstall'])
+    expect(saved().state.added).not.toContain('o/helper')
+    expect(saved().state.pinned).not.toContain('o/helper')
+    expect(service.installs['o/helper']).toBeUndefined()
+  })
+
+  it('clears a stale sidebar record after recovery forgot its market install', async () => {
+    const { service, ctx, saved } = await fixture({ ...emptyState(), added: ['o/helper'], pinned: ['o/helper'] })
+    service.remoteCatalog = [listed()]
+    ctx.remote = { pluginManager: { listBundles: vi.fn(async () => ({ ok: true, value: [] })) } }
+    await service.refreshNative()
+    await service.removeStaleWorkbenchRecord('o/helper')
+    expect(saved().state.added).toEqual([])
+    expect(saved().state.pinned).toEqual([])
+  })
+
+  it('lets a removed package install again despite a newer version in its stale record', async () => {
+    const { service, ctx } = await fixture({ ...emptyState(), added: ['o/helper'] })
+    service.remoteCatalog = [listed({ version: '1.0.0' })]
+    service.installs = { 'o/helper': { catalogId: 'o/helper', pluginName: 'helper', version: '9.0.0' } }
+    ctx.remote = { pluginManager: { listBundles: vi.fn(async () => ({ ok: true, value: [] })) } }
+    await service.refreshNative()
+    const calls = withMarket(service, { '/api/desktop-workbenches/market-install': () => Response.json({ install: { catalogId: 'o/helper', pluginName: 'helper', version: '1.0.0' }, restartRequired: true }) })
+    await service.installFromMarket('o/helper')
+    expect(calls).toEqual(['/api/desktop-workbenches/market-install'])
+    expect(service.installs['o/helper'].version).toBe('1.0.0')
   })
 
   it('installs a market entry, pins its repository identity, and asks for a restart', async () => {
@@ -2488,10 +2539,13 @@ describe('workbench market screenshot and metadata display', () => {
       expect(versionActions.props.children[0].props.children).toEqual(['v1.0.0'])
       expect(versionActions.props.children[1].props.children.at(-1).props.children[0]).toBe('更新')
       const diagnostic = versionActions.props.children[2]
-      expect(diagnostic.props.className).toBe('dshWbFailureIcon')
-      expect(diagnostic.props.title).toBe('Update rejected')
-      expect(diagnostic.props['aria-label']).toBe('更新失败详情：Update rejected')
-      expect(diagnostic.props.tabIndex).toBe(0)
+      expect(diagnostic.props.className).toBe('dshWbFailureHint')
+      expect(ui.find(diagnostic, node => node.props?.className === 'dshWbInstallFailed')[0].props.children).toEqual(['更新失败'])
+      const icon = ui.find(diagnostic, node => node.props?.className === 'dshWbFailureIcon')[0]
+      expect(icon.props['aria-label']).toBe('更新失败详情：Update rejected')
+      expect(icon.props['aria-describedby']).toBe(ui.find(diagnostic, node => node.props?.role === 'tooltip')[0].props.id)
+      expect(icon.props.tabIndex).toBe(0)
+      expect(ui.find(diagnostic, node => node.props?.role === 'tooltip')[0].props.children).toEqual(['Update rejected'])
       expect(ui.find(controls, node => node.props?.className === 'dshWbInstallFailed')).toHaveLength(0)
       expect(ui.find(card, node => node.props?.className === 'dshWbRetry')).toHaveLength(0)
       if (tab === 'mine') expect(ui.find(controls, node => node.props?.role === 'switch')).toHaveLength(1)
@@ -2563,10 +2617,10 @@ describe('workbench market screenshot and metadata display', () => {
       expect(footer.props.children).toEqual([versionActions, controls])
       expect(ui.find(card, node => node.props?.className === 'dshWbInstalled dshWbInstallFailed')).toHaveLength(0)
       const diagnostic = ui.find(card, node => node.props?.className === 'dshWbFailureIcon')[0]
-      expect(diagnostic.props.title).toBe('Error: incompatible client API')
-      expect(diagnostic.props['aria-label']).toBe('工作台加载失败详情：Error: incompatible client API')
+      expect(diagnostic.props['aria-label']).toBe('加载失败详情：Error: incompatible client API')
       expect(diagnostic.props.tabIndex).toBe(0)
-      expect(versionActions.props.children[2]).toBe(diagnostic)
+      expect(ui.find(versionActions.props.children[2], node => node === diagnostic)).toHaveLength(1)
+      expect(ui.find(card, node => node.props?.className === 'dshWbFailureHint')[0].props.children[0].props.children).toEqual(['加载失败'])
       expect(ui.find(card, node => node.props?.className === 'dshWbRetry')).toHaveLength(0)
       const button = ui.find(card, node => node.props?.className === 'dshWbUpdate')[0]
       expect(button.props['aria-label']).toBe('更新Helper至 v1.1.0')
@@ -2583,21 +2637,24 @@ describe('workbench market screenshot and metadata display', () => {
     expect(retry).toHaveBeenCalledWith('o/helper')
   })
 
-  it('marks stale added and installed records as failed after a restart, even without a module error', async () => {
-    const { service } = await fixture({ ...emptyState(), added: ['o/helper'], pinned: ['o/helper'] })
+  it('reports a provider load failure only while its native package remains installed', async () => {
+    const { service, ctx } = await fixture({ ...emptyState(), added: ['o/helper'], pinned: ['o/helper'] })
     service.remoteCatalog = [listed()]
     service.installs = { 'o/helper': { catalogId: 'o/helper', pluginName: 'helper', version: '1.0.0' } }
-    service.publish()
+    ctx.remote = { pluginManager: { listBundles: vi.fn(async () => ({ ok: true, value: [{ name: 'helper', installed: true, enabled: true }] })) } }
+    await service.refreshNative()
     const entry = service.getSnapshot().catalog.find(item => item.catalogId === 'o/helper')
     expect(entry).toMatchObject({ installed: false, pendingRestart: false })
     expect(entry.loadFailure).toContain('启动后未注册')
     expect(cardButtons(marketCard(service))).toEqual([])
     expect(cardButtons(marketCard(service))).not.toContain('打开工作台')
 
-    service.installs = {}
-    service.publish()
-    expect(service.getSnapshot().catalog.find(item => item.catalogId === 'o/helper').loadFailure).toContain('安装包不存在')
-    expect(JSON.stringify(marketCard(service))).toContain('安装失败')
+    ctx.remote.pluginManager.listBundles.mockResolvedValue({ ok: true, value: [] })
+    await service.refreshNative()
+    expect(service.getSnapshot().catalog.find(item => item.catalogId === 'o/helper').loadFailure).toBe('')
+    expect(service.marketInstallFor('o/helper')).toBeNull()
+    expect(JSON.stringify(marketCard(service))).not.toContain('安装失败')
+    expect(cardButtons(marketCard(service))).toContain('安装')
   })
 
   it('shows an install API error on the card and recovers after a successful retry', async () => {
@@ -2611,9 +2668,13 @@ describe('workbench market screenshot and metadata display', () => {
     const ui = interactiveMarket(service, 'market')
     const card = ui.find(ui.render(), node => node.type === 'article')[0]
     const controls = ui.find(card, node => node.props?.className === 'dshWbCardControls')[0]
-    expect(ui.find(controls, node => node.props?.className === 'dshWbInstalled dshWbInstallFailed')[0].props.children).toEqual(['安装失败'])
-    expect(ui.find(controls, node => node.props?.className === 'dshWbFailureIcon')[0].props.title).toBe('Package checksum mismatch')
+    expect(ui.find(controls, node => node.props?.className === 'dshWbFailureHint')[0].props.children[0].props.children).toEqual(['安装失败'])
+    expect(ui.find(controls, node => node.props?.className === 'dshWbFailureTooltip')[0].props.children).toEqual(['Package checksum mismatch'])
     expect(ui.find(controls, node => node.props?.className === 'dshWbRetry')).toHaveLength(1)
+    const clear = ui.find(controls, node => node.props?.children?.includes?.('清除失败提示'))[0]
+    expect(clear).toBeDefined()
+    clear.props.onClick()
+    expect(service.installFailures.has('o/helper')).toBe(false)
     expect(ui.find(card, node => node.props?.className === 'dshWbUpdate')).toHaveLength(0)
 
     withMarket(service, { '/api/desktop-workbenches/market-install': () => Response.json({ install: { catalogId: 'o/helper', pluginName: 'helper', version: '1.0.0' }, restartRequired: true }) })
@@ -2636,9 +2697,10 @@ describe('workbench market screenshot and metadata display', () => {
     const ui = interactiveMarket(service, 'market')
     const card = ui.find(ui.render(), node => node.type === 'article')[0]
     expect(ui.find(card, node => node.props?.className === 'dshWbUpdate')[0].props.children.at(-1).props.children[0]).toBe('更新')
-    expect(ui.find(card, node => node.props?.className === 'dshWbFailureIcon')[0].props.title).toBe('Update rejected')
+    expect(ui.find(card, node => node.props?.className === 'dshWbFailureTooltip')[0].props.children).toEqual(['Update rejected'])
+    expect(ui.find(card, node => node.props?.className === 'dshWbFailureHint')[0].props.children[0].props.children).toEqual(['更新失败'])
     expect(ui.find(card, node => node.props?.className === 'dshWbInstalled')[0].props.children).toEqual(['已安装'])
-    expect(ui.find(card, node => node.props?.className === 'dshWbInstallFailed')).toHaveLength(0)
+    expect(ui.find(ui.find(card, node => node.props?.className === 'dshWbCardControls')[0], node => node.props?.className === 'dshWbInstallFailed')).toHaveLength(0)
     expect(cardButtons(marketCard(service))).not.toContain('打开工作台')
   })
 
@@ -2774,8 +2836,9 @@ describe('workbench market screenshot and metadata display', () => {
     const modal = ui.modal(ui.render())
     expect(modal.props.entry.id).toBe('owner/local')
     expect(modal.props.nativeUninstall).toBe(true)
-    const failed = ui.find(ui.render(), node => node.type === 'article' && node.props.key === 'o/helper')[0]
-    expect(ui.find(failed, node => node.props?.className === 'dshWbUninstall')[0].props.disabled).toBe(true)
+    // The missing package remains manageable until its stale sidebar record is cleared.
+    const stale = ui.find(ui.render(), node => node.type === 'article' && node.props.key === 'o/helper')[0]
+    expect(ui.find(stale, node => node.props?.className === 'dshWbUninstall')[0].props['aria-label']).toBe('移除残留记录Helper')
   })
 
   it('offers installation in market cards and keeps update and uninstall services', () => {
