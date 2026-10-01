@@ -16,7 +16,7 @@ it('all patched JavaScript has no unresolved local identifiers', () => {
   const failures = program.getSemanticDiagnostics().filter(diagnostic => {
     if (![2304, 2552, 18004].includes(diagnostic.code)) return false
     const name = diagnostic.file.text.slice(diagnostic.start, diagnostic.start + diagnostic.length)
-    return !['global', 'setImmediate'].includes(name)
+    return !['global', 'setImmediate', 'clearImmediate', '__dirname'].includes(name)
   }).map(diagnostic => `${diagnostic.file.fileName}:${diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')}`)
   expect(failures).toEqual([])
 }, 30000)

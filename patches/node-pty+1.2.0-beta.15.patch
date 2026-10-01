@@ -1,0 +1,16 @@
+diff --git a/node_modules/node-pty/lib/unixTerminal.js b/node_modules/node-pty/lib/unixTerminal.js
+index af2d24c..f260b49 100644
+--- a/node_modules/node-pty/lib/unixTerminal.js
++++ b/node_modules/node-pty/lib/unixTerminal.js
+@@ -30,7 +30,10 @@ var native = (0, utils_1.loadNativeModule)('pty');
+ var pty = native.module;
+ var helperPath = native.dir + '/spawn-helper';
+ helperPath = path.resolve(__dirname, helperPath);
+-helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
++// DSH Desktop: Harness loads packages from the physical app.asar.unpacked path,
++// which the plain replace turned into app.asar.unpacked.unpacked (ENOENT from
++// posix_spawn). Remove once upstream node-pty skips already-unpacked paths.
++helperPath = helperPath.replace(/app\.asar(?!\.unpacked)/, 'app.asar.unpacked');
+ helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
+ var DEFAULT_FILE = 'sh';
+ var DEFAULT_NAME = 'xterm';
