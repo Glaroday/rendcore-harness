@@ -1111,8 +1111,13 @@ window.__ModuleLoader__.load({
     `
     function ensureStyles() {
       const existing = document.querySelector('style[data-plugin-css="dsh-desktop-workbenches"]')
-      if (existing) { if (existing.textContent !== css) existing.textContent = css; return }
+      if (existing) {
+        existing.dataset.plugin = 'dsh-desktop-workbenches'
+        if (existing.textContent !== css) existing.textContent = css
+        return
+      }
       const style = document.createElement('style')
+      style.dataset.plugin = 'dsh-desktop-workbenches'
       style.dataset.pluginCss = 'dsh-desktop-workbenches'
       style.textContent = css
       document.head.appendChild(style)
