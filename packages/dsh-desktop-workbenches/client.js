@@ -39,6 +39,13 @@ window.__ModuleLoader__.load({
       return false
     }
     const KNOWN_PROVIDERS_KEY = 'dsh-desktop-workbenches.known-providers.v1'
+    const INTRODUCED_LOCAL_KEY = 'dsh-desktop-workbenches.introduced-local.v1'
+    const readIntroducedLocal = () => {
+      try {
+        const value = JSON.parse(window.localStorage?.getItem(INTRODUCED_LOCAL_KEY) || '[]')
+        return new Set(Array.isArray(value) ? value.filter(id => typeof id === 'string') : [])
+      } catch { return new Set() }
+    }
     const readKnownProviders = () => {
       try {
         const value = JSON.parse(window.localStorage?.getItem(KNOWN_PROVIDERS_KEY) || '{}')
@@ -97,6 +104,7 @@ window.__ModuleLoader__.load({
         this.catalog = new Map()
         this.providers = new Map()
         this.knownProviders = readKnownProviders()
+        this.introducedLocal = readIntroducedLocal()
         this.remoteCatalog = []
         // The market's own category list; submissions choose from it.
         this.marketCategories = []
@@ -308,6 +316,25 @@ window.__ModuleLoader__.load({
           }
         }))
       }
+      rememberIntroducedLocal(ids) {
+        for (const id of ids) this.introducedLocal.add(id)
+        try { window.localStorage?.setItem(INTRODUCED_LOCAL_KEY, JSON.stringify([...this.introducedLocal])) } catch {}
+      }
+      reconcileLocalProviders() {
+        if (!this.ready || this.blocked || this.disposed) return
+        const local = this.marketCatalog().filter(entry => entry.local && this.catalog.has(entry.id))
+        this.rememberIntroducedLocal(local.filter(entry => this.state.added.includes(entry.id)).map(entry => entry.id))
+        const additions = local.filter(entry => this.state.added.includes(entry.id)
+          ? !this.state.pinned.includes(entry.id)
+          : !this.introducedLocal.has(entry.id))
+        if (!additions.length) return
+        this.run(this.commit(state => {
+          for (const entry of additions) {
+            if (!state.added.includes(entry.id)) state.added.push(entry.id)
+            if (!state.pinned.includes(entry.id)) state.pinned.push(entry.id)
+          }
+        }).then(() => this.rememberIntroducedLocal(additions.map(entry => entry.id))))
+      }
       migrateLegacyWorkbenchIds() {
         if (!this.ready || this.blocked || this.disposed) return
         const migrations = {}
@@ -376,6 +403,7 @@ window.__ModuleLoader__.load({
             // A catalog refresh updates discovery metadata only. It must not
             // navigate, rewrite session ownership, or change the active workbench.
             this.rebuildProviders({ preserveActive: true })
+            this.reconcileLocalProviders()
           } catch (error) {
             if (!this.disposed) this.catalogError = error instanceof Error ? error.message : String(error)
           } finally {
@@ -463,6 +491,20 @@ window.__ModuleLoader__.load({
       marketInstallFor(id) {
         return this.installs[id] ? id : null
       }
+      localRemovalStatus(entry) {
+        if (this.native.status !== NATIVE_STATUS.ready) return { removable: false, reason: '暂时无法读取插件状态，请重启后重试。' }
+        const name = this.pluginFor(entry)
+        const bundle = name && this.native.bundles[name]
+        if (!bundle || bundle.installed === false) return { removable: false, reason: '未找到可卸载的原生插件，请检查安装来源。' }
+        if (bundle.removable !== true) {
+          const reason = bundle.readOnlyReason === 'management-required' ? '此插件由宿主管理，不能在工作台市场内卸载。'
+            : bundle.readOnlyReason === 'unaddressable' ? '无法定位此插件的安装来源。请使用原安装方式移除，并重启 Harness。'
+              : '当前安装方式不支持应用内卸载。请使用原安装方式移除，并重启 Harness。'
+          return { removable: false, reason }
+        }
+        if (!this.ctx.remote?.pluginManager?.removeBundle) return { removable: false, reason: '原生插件卸载服务不可用，请重启后重试。' }
+        return { removable: true, reason: '' }
+      }
       async removeWorkbench(id) {
         // Market installs use their recorded package identity. Other workbenches
         // must resolve to a removable native bundle before their record is cleared.
@@ -489,6 +531,8 @@ window.__ModuleLoader__.load({
           if (result.value.application === 'restart-required') this.restartNeeded = true
           this.removedWorkbenchIds.add(id)
           await this.remove(id)
+          this.introducedLocal.delete(id)
+          try { window.localStorage?.setItem(INTRODUCED_LOCAL_KEY, JSON.stringify([...this.introducedLocal])) } catch {}
           await this.refreshNative()
         } catch (error) {
           await this.refreshNative()
@@ -531,6 +575,7 @@ window.__ModuleLoader__.load({
           this.publish()
           this.migrateLegacyWorkbenchIds()
           this.reconcileMarketInstalls()
+          this.reconcileLocalProviders()
           const active = this.state.active
           if (active && this.activationFor(this.catalog.get(active) || { id: active }) === 'off') await this.leave()
           const restoreMarket = this.restoreMarketOnLoad || this.marketOpen
@@ -593,6 +638,7 @@ window.__ModuleLoader__.load({
         this.rebuildProviders()
         this.publish()
         this.reconcileMarketInstalls()
+        this.reconcileLocalProviders()
         return () => {
           if (this.providers.get(source) !== entry) return
           this.providers.delete(source)
@@ -1001,6 +1047,7 @@ window.__ModuleLoader__.load({
       .dshWbCard{min-width:0;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);overflow:hidden;transition:transform .2s cubic-bezier(.2,.8,.2,1),box-shadow .2s cubic-bezier(.2,.8,.2,1)}
       .dshWbCard:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.08)}
       .dshWbCardBody{display:flex;flex-direction:column;gap:8px;padding:18px 20px 16px;height:232px;flex:0 0 232px;box-sizing:border-box;min-width:0}.dshWbCardTitle{display:flex;align-items:center;gap:8px;min-width:0;height:26px;flex:0 0 26px}.dshWbCardTitle h2{flex:1;min-width:0;white-space:nowrap;overflow:hidden}.dshWbCardTitle .dshWbTitleLink{min-width:0;overflow:hidden;white-space:nowrap}
+      .dshWbCardBody:has(.dshWbUninstallReason){height:auto;min-height:232px;flex-basis:auto}.dshWbCardBody:has(.dshWbUninstallReason) .dshWbCardDescription{min-height:0;-webkit-line-clamp:2}
       .dshWbCard h2{overflow-wrap:anywhere;display:flex;align-items:center;gap:7px;min-width:0;font-size:18px;line-height:26px;letter-spacing:-.018em;font-weight:650;margin:0}.dshWbCard p{overflow-wrap:anywhere;margin:0;font-size:14px;line-height:22px}.dshWbCardDescription{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;min-height:88px}
       .dshWbCard .dshWbActions{margin-top:auto;min-height:36px;gap:8px;padding-top:8px;align-items:center;justify-content:flex-end;flex-wrap:nowrap}.dshWbCardVersionActions{display:flex;align-items:center;gap:8px;min-width:0;margin-right:auto}.dshWbCardControls{display:flex;align-items:center;gap:8px;margin-left:auto}.dshWbCardVersion{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap;font-variant-numeric:tabular-nums}.dshWbCardIcon{display:grid;place-items:center;width:20px;height:20px;flex-shrink:0;color:var(--dsw-alias-label-secondary)}.dshWbGlyph{display:inline-grid;place-items:center;line-height:1;flex-shrink:0}.dshWbMonogram{box-sizing:border-box;border:1.3px solid currentColor;border-radius:4px;font-weight:600}.dshWbCard .dshWbBtn{font-size:12px;line-height:18px;padding:6px 11px}.dshWbInstalled{display:inline-flex;align-items:center;min-height:32px;padding:6px 11px;box-sizing:border-box;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}.dshWbInstallFailed{color:var(--dsw-alias-state-error-primary)}.dshWbFailureIcon{display:inline-grid;place-items:center;width:24px;height:24px;flex:0 0 24px;color:var(--dsw-alias-state-error-primary);cursor:help}.dshWbRetry{display:inline-grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary)}.dshWbRetry:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}.dshWbRunSwitch{position:relative;width:38px;height:22px;flex:0 0 38px;padding:0;border:0;border-radius:999px;background:var(--dsw-alias-border-l2);transition:background .15s}.dshWbRunSwitch[aria-checked=true]{background:var(--dsw-alias-label-primary)}.dshWbRunSwitch::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-bg-layer-1);transition:transform .15s}.dshWbRunSwitch[aria-checked=true]::after{transform:translateX(16px)}
       .dshWbCategory{margin-left:auto;font-size:11px;line-height:18px;color:var(--dsw-alias-label-secondary);background:transparent;padding:0;white-space:nowrap}
@@ -1014,7 +1061,7 @@ window.__ModuleLoader__.load({
       .dshWbCardScreenshot{display:block;width:100%;height:100%;object-fit:cover;background:var(--dsw-alias-bg-module-platform)}
       .dshWbFavorite{position:absolute;right:10px;top:10px;z-index:2;display:grid;place-items:center;width:32px;height:32px;padding:0;border:0;border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);box-shadow:0 4px 14px rgba(0,0,0,.12);opacity:0;transform:translateY(-3px);transition:opacity .16s,transform .16s,color .16s}
       .dshWbCard:hover .dshWbFavorite,.dshWbFavorite:focus-visible,.dshWbFavorite[aria-pressed=true]{opacity:1;transform:none}.dshWbFavorite:hover,.dshWbFavorite[aria-pressed=true]{color:var(--dsw-alias-label-primary)}.dshWbFavorite[aria-pressed=true] svg{fill:currentColor}
-      .dshWbMediaActions{position:absolute;left:10px;right:48px;top:10px;z-index:2;display:flex;align-items:center;gap:6px;min-width:0}.dshWbUninstall{display:grid;place-items:center;width:32px;height:32px;flex:0 0 32px;padding:0;border:0;border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);box-shadow:0 4px 14px rgba(0,0,0,.12);opacity:0;transform:translateY(-3px);transition:opacity .16s,transform .16s,color .16s}.dshWbCard:hover .dshWbUninstall,.dshWbUninstall:focus-visible{opacity:1;transform:none}.dshWbUninstall:hover:not(:disabled){color:var(--dsw-alias-state-error-primary)}
+      .dshWbMediaActions{position:absolute;left:10px;right:48px;top:10px;z-index:2;display:flex;align-items:center;gap:6px;min-width:0}.dshWbUninstall{display:grid;place-items:center;width:32px;height:32px;flex:0 0 32px;padding:0;border:0;border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);box-shadow:0 4px 14px rgba(0,0,0,.12);opacity:0;transform:translateY(-3px);transition:opacity .16s,transform .16s,color .16s}.dshWbCard:hover .dshWbUninstall,.dshWbUninstall:focus-visible{opacity:1;transform:none}.dshWbUninstall:hover:not(:disabled){color:var(--dsw-alias-state-error-primary)}.dshWbLocalUninstall{display:flex;align-items:center;gap:5px;width:auto;flex:0 0 auto;padding:0 8px;font-size:12px;opacity:1;transform:none}.dshWbLocalUninstall:disabled{cursor:not-allowed}.dshWbUninstallReason{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
       .dshWbUpdate{display:inline-flex;align-items:center;gap:4px;min-width:0;min-height:28px;padding:3px 7px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px;white-space:nowrap}.dshWbUpdate svg{flex:none}.dshWbUpdateText{min-width:0;overflow:hidden;text-overflow:ellipsis}.dshWbUpdate:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}.dshWbUpdate:disabled{opacity:1}
       .dshWbTitleLink{display:inline-flex;align-items:center;gap:7px;color:inherit;text-decoration:none;border-bottom:1px solid transparent}a.dshWbTitleLink:hover{border-bottom-color:currentColor}.dshWbTitleLink:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:2px;border-radius:3px}.dshWbTitleText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .dshWbAvatar{width:18px;height:18px;flex:0 0 auto;border-radius:50%;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform)}
@@ -1637,7 +1684,8 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
             const activation = service.activationFor(entry)
             const bundle = pluginName && native?.bundles?.[pluginName]
             const hasNativeControl = !!bundle && !bundle.readOnlyReason && !bundle.error
-            const canUninstall = !!service.marketInstallFor(entry.id) || (native?.status === NATIVE_STATUS.ready && !!bundle && bundle.installed !== false && bundle.removable === true)
+            const localRemoval = entry.local ? service.localRemovalStatus(entry) : null
+            const canUninstall = localRemoval ? localRemoval.removable : !!service.marketInstallFor(entry.id) || (native?.status === NATIVE_STATUS.ready && !!bundle && bundle.installed !== false && bundle.removable === true)
             const installed = !removedWorkbenchIds.includes(catalogId) && (entry.pendingRestart || (native?.status === NATIVE_STATUS.ready && pluginName
               ? !!bundle && bundle.installed !== false
               : entry.installed || !!installs[catalogId]))
@@ -1653,11 +1701,12 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
             const updateLabel = awaitingRestart ? '重启后生效' : updating ? '更新中…' : '更新'
             const updateTitle = awaitingRestart ? `${entry.title}安装完成，重启 Harness 后生效` : updating ? `正在更新${entry.title}` : `${updateLabel}${entry.title}至 v${entry.listedVersion}`
             return h('article', { key: catalogId, className: 'dshWbCard' },
-              h('div', { className: 'dshWbMedia' }, h('button', { type: 'button', className: 'dshWbMediaOpen', 'aria-label': `查看${entry.title}详情`, onClick: () => setDetail(catalogId) }, h(Preview, { entry }), h('span', { className: 'dshWbMediaZoom', 'aria-hidden': true }, h(MarketIcon, { name: 'zoom', size: 18 }))), tab === 'mine' && h('div', { className: 'dshWbMediaActions' }, h('button', { type: 'button', className: 'dshWbUninstall', title: canUninstall ? `卸载${entry.title}` : '原生插件状态未知或不可卸载', 'aria-label': `卸载${entry.title}`, disabled: disabled || !!removingPlugin || !canUninstall, onClick: () => setRemoving(entry.id) }, h(MarketIcon, { name: 'remove', size: 17 }))), !entry.local && h('button', { type: 'button', className: 'dshWbFavorite', title: isFavorite ? '取消收藏' : '收藏工作台', 'aria-label': isFavorite ? `取消收藏${entry.title}` : `收藏${entry.title}`, 'aria-pressed': isFavorite, disabled: disabled, onClick: () => service.run(service.toggleFavorite(catalogId)) }, h(MarketIcon, { name: 'bookmark', size: 17 }))),
+              h('div', { className: 'dshWbMedia' }, h('button', { type: 'button', className: 'dshWbMediaOpen', 'aria-label': `查看${entry.title}详情`, onClick: () => setDetail(catalogId) }, h(Preview, { entry }), h('span', { className: 'dshWbMediaZoom', 'aria-hidden': true }, h(MarketIcon, { name: 'zoom', size: 18 }))), tab === 'mine' && h('div', { className: 'dshWbMediaActions' }, h('button', { type: 'button', className: entry.local ? 'dshWbUninstall dshWbLocalUninstall' : 'dshWbUninstall', title: canUninstall ? `卸载${entry.title}` : localRemoval?.reason || '原生插件状态未知或不可卸载', 'aria-label': `卸载${entry.title}`, disabled: disabled || !!removingPlugin || !canUninstall, onClick: () => setRemoving(entry.id) }, h(MarketIcon, { name: 'remove', size: 17 }), entry.local && '卸载')), !entry.local && h('button', { type: 'button', className: 'dshWbFavorite', title: isFavorite ? '取消收藏' : '收藏工作台', 'aria-label': isFavorite ? `取消收藏${entry.title}` : `收藏${entry.title}`, 'aria-pressed': isFavorite, disabled: disabled, onClick: () => service.run(service.toggleFavorite(catalogId)) }, h(MarketIcon, { name: 'bookmark', size: 17 }))),
               h('div', { className: 'dshWbCardBody' },
                 h('div', { className: 'dshWbCardTitle' }, h('h2', null, h(EntryTitle, { entry, showIcon: true })), h('span', { className: 'dshWbCategory' }, entry.local ? '本地' : entry.category || '其他')),
                 h(EntryMeta, { entry, showVersion: false }),
                 h('p', { className: 'dshWbMuted dshWbCardDescription' }, entry.description || '这个工作台暂时还没有填写介绍。'),
+                tab === 'mine' && localRemoval && !localRemoval.removable && h('p', { className: 'dshWbUninstallReason', role: 'status' }, localRemoval.reason),
                 h('div', { className: 'dshWbActions' },
                   h('div', { className: 'dshWbCardVersionActions' },
                     typeof cardVersion === 'string' && cardVersion.trim() && h('span', { className: 'dshWbCardVersion' }, `v${cardVersion.trim()}`),

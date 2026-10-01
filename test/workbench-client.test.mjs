@@ -608,13 +608,44 @@ describe('desktop workbench client navigation', () => {
   })
 
   it('derives an unlisted local provider identity from its GitHub repository', async () => {
-    const { service, ctx } = await fixture()
+    const { service, ctx, saved } = await fixture()
     setFiberPackage(ctx, 'local-package')
     service.register({ title: 'Local workbench', repository: 'https://github.com/Owner/Local-Workbench.git' }, () => null)
+    await service.queue
     expect(service.getSnapshot().catalog).toContainEqual(expect.objectContaining({
       id: 'owner/local-workbench', catalogId: 'owner/local-workbench', sourcePackage: 'local-package', installed: true, listed: false, local: true
     }))
+    expect(saved().state.added).toContain('owner/local-workbench')
+    expect(saved().state.pinned).toContain('owner/local-workbench')
     service.dispose()
+  })
+
+  it('pins an existing local provider and keeps explicit removal after reload', async () => {
+    const id = 'owner/local'
+    const { service, ctx, saved } = await fixture({ ...emptyState(), added: [id] })
+    setFiberPackage(ctx, 'local-package')
+    const unregister = service.register({ title: 'Local', repository: `https://github.com/${id}` }, () => null)
+    await service.queue
+    expect(saved().state.pinned).toContain(id)
+    await service.remove(id)
+    unregister()
+    service.register({ title: 'Local', repository: `https://github.com/${id}` }, () => null)
+    await service.queue
+    await service.load()
+    expect(saved().state.added).not.toContain(id)
+    expect(saved().state.pinned).not.toContain(id)
+  })
+
+  it('adds a local provider registered before loading finishes', async () => {
+    const { ctx, request, saved } = await fixture()
+    const loading = new Workbenches(ctx, request)
+    setFiberPackage(ctx, 'preload-local')
+    loading.register({ title: 'Preload local', repository: 'https://github.com/owner/preload-local' }, () => null)
+    await loading.load()
+    await loading.queue
+    expect(saved().state.added).toContain('owner/preload-local')
+    expect(saved().state.pinned).toContain('owner/preload-local')
+    loading.dispose()
   })
 
   it('does not expose a provider when its repository disagrees with the market', async () => {
@@ -2415,6 +2446,27 @@ describe('workbench market screenshot and metadata display', () => {
     expect(service.getSnapshot().restartNeeded).toBe(false)
   })
 
+  it('explains why an unmanaged local bundle cannot be uninstalled', async () => {
+    const { service, ctx } = await fixture({ ...emptyState(), added: ['owner/local'], pinned: ['owner/local'] })
+    setFiberPackage(ctx, 'local-package')
+    service.register({ title: 'Local', repository: 'https://github.com/owner/local' }, () => null)
+    ctx.remote = { pluginManager: { listBundles: vi.fn(async () => ({ ok: true, value: [{ name: 'local-package', installed: true, enabled: true, removable: false, readOnlyReason: 'management-required' }] })) } }
+    await service.refreshNative()
+    const ui = interactiveMarket(service, 'mine')
+    const card = ui.find(ui.render(), node => node.type === 'article' && node.props.key === 'owner/local')[0]
+    expect(ui.find(card, node => node.props?.className === 'dshWbUninstallReason')[0].props.children[0]).toContain('宿主管理')
+    expect(ui.find(card, node => node.props?.className === 'dshWbUninstall dshWbLocalUninstall')[0].props.disabled).toBe(true)
+  })
+
+  it('allows uninstalling a removable local bundle after its provider fails to load', async () => {
+    const { service, ctx } = await fixture({ ...emptyState(), added: ['owner/local'], pinned: ['owner/local'] })
+    setFiberPackage(ctx, 'local-package')
+    service.register({ title: 'Local', repository: 'https://github.com/owner/local' }, () => null)
+    ctx.remote = { pluginManager: { listBundles: vi.fn(async () => ({ ok: true, value: [{ name: 'local-package', installed: true, enabled: true, removable: true, error: 'Client activation failed' }] })), removeBundle: vi.fn() } }
+    await service.refreshNative()
+    expect(service.localRemovalStatus(service.getSnapshot().catalog.find(item => item.id === 'owner/local')).removable).toBe(true)
+  })
+
   it('uses local provider versions and hides unknown versions', async () => {
     const { service, ctx } = await fixture({ ...emptyState(), added: ['owner/local'] })
     setFiberPackage(ctx, 'local-package')
@@ -2621,7 +2673,7 @@ describe('workbench market screenshot and metadata display', () => {
     await service.refreshNative()
     const ui = interactiveMarket(service, 'mine')
     const card = ui.find(ui.render(), node => node.type === 'article' && node.props.key === 'owner/local')[0]
-    expect(ui.find(card, node => node.props?.className === 'dshWbUninstall')[0].props.disabled).toBe(true)
+    expect(ui.find(card, node => node.props?.className === 'dshWbUninstall dshWbLocalUninstall')[0].props.disabled).toBe(true)
     await expect(service.removeWorkbench('owner/local')).rejects.toThrow('不可卸载')
     expect(ctx.remote.pluginManager.removeBundle).not.toHaveBeenCalled()
     expect(saved().state.added).toEqual(['owner/local'])
@@ -2657,11 +2709,12 @@ describe('workbench market screenshot and metadata display', () => {
     service.remoteCatalog = [listed()]
     setFiberPackage(ctx, 'local-package')
     service.register({ title: 'Local', repository: 'https://github.com/owner/local' }, () => null)
-    ctx.remote = { pluginManager: { listBundles: vi.fn(async () => ({ ok: true, value: [{ name: 'local-package', installed: true, enabled: true, removable: true }] })) } }
+    ctx.remote = { pluginManager: { listBundles: vi.fn(async () => ({ ok: true, value: [{ name: 'local-package', installed: true, enabled: true, removable: true }] })), removeBundle: vi.fn() } }
     await service.refreshNative()
+    await service.queue
     const ui = interactiveMarket(service, 'mine')
     const local = ui.find(ui.render(), node => node.type === 'article' && node.props.key === 'owner/local')[0]
-    const uninstall = ui.find(local, node => node.props?.className === 'dshWbUninstall')[0]
+    const uninstall = ui.find(local, node => node.props?.className === 'dshWbUninstall dshWbLocalUninstall')[0]
     expect(uninstall.props.disabled).toBe(false)
     uninstall.props.onClick()
     const modal = ui.modal(ui.render())
