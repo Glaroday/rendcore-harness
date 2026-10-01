@@ -83,7 +83,7 @@ window.__ModuleLoader__.load({
       getSnapshot() { return this.enabled },
       set(value) { this.enabled = !!value; try { window.localStorage.setItem(WORKBENCH_PREF, String(this.enabled)) } catch {} ; for (const listener of this.listeners) listener() }
     }
-    const EMPTY = () => ({ version: 1, added: [], pinned: [], favorites: [], active: null, sessionBindings: {}, recentSessions: {}, notes: {} })
+    const EMPTY = () => ({ version: 1, added: [], pinned: [], favorites: [], active: null, sessionBindings: {}, recentSessions: {}, notes: {}, hiddenWorkspaces: {} })
     // This controller owns navigation and local state only. It never terminates
     // agents, changes a running session's preset, or registers global tools.
     class Workbenches {
@@ -341,6 +341,7 @@ window.__ModuleLoader__.load({
         const referenced = id => this.state.added.includes(id) || this.state.pinned.includes(id) || this.state.favorites.includes(id)
           || this.state.active === id || Object.values(this.state.sessionBindings).includes(id)
           || Object.hasOwn(this.state.recentSessions, id) || Object.hasOwn(this.state.notes, id)
+          || Object.hasOwn(this.state.hiddenWorkspaces, id)
         for (const entry of this.remoteCatalog) {
           for (const legacy of [entry.workbenchId, ...(entry.legacyWorkbenchIds || [])]) {
             if (typeof legacy === 'string' && legacy !== entry.id && referenced(legacy)) migrations[legacy] = entry.id
@@ -360,6 +361,10 @@ window.__ModuleLoader__.load({
             if (Object.hasOwn(state.notes, legacy)) {
               state.notes[current] = state.notes[current] ? `${state.notes[current]}\n\n${state.notes[legacy]}` : state.notes[legacy]
               delete state.notes[legacy]
+            }
+            if (Object.hasOwn(state.hiddenWorkspaces, legacy)) {
+              state.hiddenWorkspaces[current] = [...new Set([...(state.hiddenWorkspaces[current] || []), ...state.hiddenWorkspaces[legacy]])]
+              delete state.hiddenWorkspaces[legacy]
             }
           }
         }, migrations))
@@ -671,7 +676,7 @@ window.__ModuleLoader__.load({
         this.setMarketOpen(false)
         const ticket = ++this.navigation
         const signal = this.ctx.layout.beginNavigation()
-        const defaultWorkspace = this.defaultWorkspace()
+        const defaultWorkspace = this.defaultWorkspace(id)
         await this.commit((state) => { state.active = id; if (!state.pinned.includes(id)) state.pinned.push(id) })
         if (this.disposed || signal.aborted || ticket !== this.navigation) return
         const target = sessionId || this.state.recentSessions[id]
@@ -808,6 +813,45 @@ window.__ModuleLoader__.load({
       workspaceFor(sessionId) {
         return this.ctx.workspaces.list.getSnapshot().items.find((item) => item.sessionIds.includes(sessionId))
       }
+      workspaceVisible(workspaceId, owner = this.state.active) {
+        return !workbenchPreference.getSnapshot() || !owner
+          || !(this.state.hiddenWorkspaces?.[owner] || []).includes(workspaceId)
+      }
+      subscribeWorkspaceVisibility(listener) {
+        const signature = () => JSON.stringify([
+          workbenchPreference.getSnapshot(), this.state.active,
+          this.state.hiddenWorkspaces?.[this.state.active] || []
+        ])
+        let previous = signature()
+        return this.subscribe(() => {
+          const current = signature()
+          if (current === previous) return
+          previous = current
+          listener()
+        })
+      }
+      visibleWorkspaces(owner = this.state.active) {
+        return this.ctx.workspaces.list.getSnapshot().items.filter((item) => this.workspaceVisible(item.workspaceId, owner))
+      }
+      async hideWorkspace(workspaceId) {
+        const owner = this.state.active
+        if (!workbenchPreference.getSnapshot() || !owner) return false
+        if (!this.ready || this.blocked || this.disposed || !this.state.added.includes(owner)) throw new Error('工作台更改尚未保存，请先重新加载。')
+        if (!this.ctx.workspaces.list.getSnapshot().items.some((item) => item.workspaceId === workspaceId)) throw new Error('工作区当前不可用。')
+        if (!this.workspaceVisible(workspaceId, owner)) return true
+        await this.commit((state) => {
+          const hidden = state.hiddenWorkspaces[owner] || []
+          state.hiddenWorkspaces[owner] = [...hidden, workspaceId]
+        })
+        return true
+      }
+      async showWorkspace(workspaceId, owner) {
+        if (this.workspaceVisible(workspaceId, owner)) return
+        await this.commit((state) => {
+          state.hiddenWorkspaces[owner] = (state.hiddenWorkspaces[owner] || []).filter((id) => id !== workspaceId)
+          if (!state.hiddenWorkspaces[owner].length) delete state.hiddenWorkspaces[owner]
+        })
+      }
       rememberNativeSession(sessionId) {
         if (!sessionId || this.state.sessionBindings[sessionId]) return
         const workspace = this.workspaceFor(sessionId)
@@ -815,16 +859,17 @@ window.__ModuleLoader__.load({
         this.nativeLocation = { sessionId, workspaceId: workspace.workspaceId }
         try { window.localStorage?.setItem(NATIVE_LOCATION, JSON.stringify(this.nativeLocation)) } catch {}
       }
-      defaultWorkspace() {
+      defaultWorkspace(owner = this.state.active) {
         const current = this.currentSession()
-        return this.workspaceFor(current) || this.ctx.workspaces.list.getSnapshot().items[0]
+        const selected = this.workspaceFor(current)
+        return selected && this.workspaceVisible(selected.workspaceId, owner) ? selected : this.visibleWorkspaces(owner)[0]
       }
       routeWorkspaceSession(sessionId, context) {
         const active = this.state.active
         const workspace = context?.workspaceId
           ? this.ctx.workspaces.list.getSnapshot().items.find((item) => item.workspaceId === context.workspaceId)
           : this.workspaceFor(sessionId)
-        if (!workbenchPreference.getSnapshot() || !this.ready || this.blocked || this.disposed || !active || !workspace || !this.state.added.includes(active) || !this.catalog.has(active) || this.activationFor(this.catalog.get(active)) === 'off') return false
+        if (!workbenchPreference.getSnapshot() || !this.ready || this.blocked || this.disposed || !active || !workspace || !this.workspaceVisible(workspace.workspaceId, active) || !this.state.added.includes(active) || !this.catalog.has(active) || this.activationFor(this.catalog.get(active)) === 'off') return false
         // A native workspace switch names whichever blank session the host
         // would normally open. While a workbench is active we intentionally do
         // not adopt that ordinary or differently-owned session: create a fresh
@@ -837,7 +882,7 @@ window.__ModuleLoader__.load({
         const signal = this.ctx.layout.beginNavigation()
         const workspaces = this.ctx.workspaces.list.getSnapshot()
         const workspace = workspaces.items.find((item) => item.workspaceId === workspaceId)
-        if (!workspace) throw new Error('工作区当前不可用。')
+        if (!workspace || !this.workspaceVisible(workspaceId, active)) throw new Error('工作区当前不可用。')
         const result = createdSessionId
           ? { sessionId: createdSessionId, bound: await this.bindOwnedSession(active, createdSessionId, ticket, signal) }
           : await this.createOwnedSession(active, workspaceId, ticket, signal)
@@ -904,6 +949,7 @@ window.__ModuleLoader__.load({
             if (typeof folder !== 'string' || !folder.trim()) throw new Error('创建会话需要业务项目文件夹。')
             const workspace = await this.ctx.workspaces.create({ path: folder })
             if (this.disposed || !this.state.added.includes(id) || !this.catalog.has(id)) throw new Error('工作台已移除或不可用。')
+            await this.showWorkspace(workspace.workspaceId, id)
             const result = await this.createOwnedSession(id, workspace.workspaceId, ticket, signal)
             sessionId = result.sessionId
             if (!result.bound) return sessionId
@@ -938,6 +984,8 @@ window.__ModuleLoader__.load({
           if (!path || !current()) return
           const workspace = await this.ctx.workspaces.create({ path })
           if (!current()) return
+          await this.showWorkspace(workspace.workspaceId, id)
+          if (!current()) return
           return this.newSession(workspace.workspaceId)
         })().finally(() => { this.workspaceCreation = null })
         return this.workspaceCreation
@@ -948,6 +996,7 @@ window.__ModuleLoader__.load({
         if (!id || !this.catalog.has(id)) throw new Error('请先打开工作台。')
         const workspace = workspaceId || this.defaultWorkspace()?.workspaceId
         if (!workspace) return this.newWorkspaceSession()
+        if (!this.workspaceVisible(workspace, id)) throw new Error('此工作区已从当前工作台移除。请重新添加该文件夹。')
         const ticket = ++this.navigation
         const signal = this.ctx.layout.beginNavigation()
         const { sessionId, bound } = await this.createOwnedSession(id, workspace, ticket, signal)
@@ -1788,7 +1837,8 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
       const currentSession = service.currentSession()
       const hasCurrentSession = !!(entry && currentSession != null && state.sessionBindings[currentSession] === entry.id)
       const disabled = !ready || pending > 0 || service.blocked
-      const chosen = workspaces.items.find((item) => item.workspaceId === workspaceId) || service.defaultWorkspace()
+      const visibleWorkspaces = workspaces.items.filter((item) => service.workspaceVisible(item.workspaceId, state.active))
+      const chosen = visibleWorkspaces.find((item) => item.workspaceId === workspaceId) || service.defaultWorkspace()
       return h('div', { className: 'dshWb dshWbFrame' }, h(Notice, { service }),
         require('react-dom').createPortal(conversation, conversationContainer),
         ...loaded.filter((item) => item.customFrame === true).map((item) => h('div', { key: item.id, className: 'dshWbCustomFrame', hidden: id !== item.id, style: { position: 'relative', overflow: 'hidden', flex: 1, minHeight: 0, minWidth: 0, width: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' } }, h(PanelBoundary, null, h(item.Component, { service, entry: item, active: id === item.id, conversation: id === item.id ? h('div', { style: { display: hasCurrentSession ? 'contents' : 'none' } }, conversationMount) : null })))),
@@ -1796,7 +1846,7 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
           h('div', { className: 'dshWbConversation' },
             entry && !hasCurrentSession && h('section', { className: 'dshWbInit' }, h('h2', null, `开始使用${entry.title}`), h('p', { className: 'dshWbMuted' }, '可以直接新建工作区并开始对话，也可以使用已有工作区。新会话会自动关联这个工作台。'),
               h(Button, { primary: !chosen, disabled, onClick: () => service.run(service.newWorkspaceSession()) }, '新建工作区并开始对话'),
-              workspaces.items.length > 0 && h('div', { className: 'dshWbActions' }, h('select', { 'aria-label': '选择工作区', value: chosen?.workspaceId || '', disabled, onChange: (event) => setWorkspaceId(event.target.value) }, h('option', { value: '', disabled: true }, '选择已有工作区'), ...workspaces.items.map((item) => h('option', { key: item.workspaceId, value: item.workspaceId }, item.title)))),
+              visibleWorkspaces.length > 0 && h('div', { className: 'dshWbActions' }, h('select', { 'aria-label': '选择工作区', value: chosen?.workspaceId || '', disabled, onChange: (event) => setWorkspaceId(event.target.value) }, h('option', { value: '', disabled: true }, '选择已有工作区'), ...visibleWorkspaces.map((item) => h('option', { key: item.workspaceId, value: item.workspaceId }, item.title)))),
               h('p', { className: 'dshWbMuted' }, chosen ? `将使用工作区：${chosen.title}` : '选择或新建一个项目文件夹，即可创建工作区并开始对话。'),
               chosen && h(Button, { primary: true, disabled, onClick: () => service.run(service.newSession(chosen.workspaceId)) }, '在此工作区新建会话')),
             // One fixed position for the native conversation: changing workbench
@@ -1829,6 +1879,12 @@ ${ACCEPTANCE_READING}先确认要公开的仓库和内容，不得公开密钥�
       ctx.effect(() => typeof ctx.uiWorkspace.registerSessionFilter === 'function'
         ? ctx.uiWorkspace.registerSessionFilter((sessionId) => service.sessionVisible(sessionId), service.subscribe.bind(service))
         : undefined, 'workbenches: sidebar session scope')
+      ctx.effect(() => typeof ctx.uiWorkspace.registerWorkspaceFilter === 'function'
+        ? ctx.uiWorkspace.registerWorkspaceFilter((workspaceId) => service.workspaceVisible(workspaceId), service.subscribeWorkspaceVisibility.bind(service))
+        : undefined, 'workbenches: sidebar workspace scope')
+      ctx.effect(() => typeof ctx.uiWorkspace.registerWorkspaceDeleteHandler === 'function'
+        ? ctx.uiWorkspace.registerWorkspaceDeleteHandler((workspaceId) => service.hideWorkspace(workspaceId))
+        : undefined, 'workbenches: scoped workspace removal')
       ctx.effect(() => typeof ctx.uiWorkspace.registerSessionStarter === 'function'
         ? ctx.uiWorkspace.registerSessionStarter((workspaceId) => {
           if (!workbenchPreference.getSnapshot() || !service.ready || !service.state.active || service.activationFor(service.catalog.get(service.state.active) || { id: service.state.active }) === 'off') return false

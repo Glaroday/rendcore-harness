@@ -446,6 +446,48 @@ describe('desktop workbench client navigation', () => {
     expect(startSession).toHaveBeenCalledWith('project-2')
   })
 
+  it('removes a shared workspace only from the active workbench while keeping both session groups', async () => {
+    const { service, ctx, saved } = await fixture(boundState())
+    const workspace = ctx.workspaces.list.getSnapshot().items[0]
+    const visibilityChanged = vi.fn()
+    const unsubscribe = service.subscribeWorkspaceVisibility(visibilityChanged)
+    await service.open('writer')
+    const beforeRemoval = visibilityChanged.mock.calls.length
+    service.publish()
+    expect(visibilityChanged).toHaveBeenCalledTimes(beforeRemoval)
+    expect(await service.hideWorkspace(workspace.workspaceId)).toBe(true)
+    expect(visibilityChanged).toHaveBeenCalledTimes(beforeRemoval + 1)
+    expect(service.workspaceVisible(workspace.workspaceId)).toBe(false)
+    expect(service.defaultWorkspace()).toBeUndefined()
+    expect(saved().state.hiddenWorkspaces).toEqual({ writer: [workspace.workspaceId] })
+    expect(saved().state.sessionBindings).toEqual(boundState().sessionBindings)
+    expect(workspace.sessionIds).toContain('writer-1')
+    expect(workspace.sessionIds).toContain('research-1')
+    await expect(service.newSession(workspace.workspaceId)).rejects.toThrow('已从当前工作台移除')
+    await service.open('research')
+    expect(service.workspaceVisible(workspace.workspaceId)).toBe(true)
+    expect(service.defaultWorkspace()?.workspaceId).toBe(workspace.workspaceId)
+    await service.open('writer')
+    expect(service.workspaceVisible(workspace.workspaceId)).toBe(false)
+    await service.openNative(vi.fn())
+    expect(service.workspaceVisible(workspace.workspaceId)).toBe(true)
+    unsubscribe()
+  })
+
+  it('restores a hidden workspace when its folder is explicitly added again', async () => {
+    const { service, ctx, saved } = await fixture(boundState())
+    const workspace = ctx.workspaces.list.getSnapshot().items[0]
+    await service.open('writer')
+    await service.hideWorkspace(workspace.workspaceId)
+    ctx.workspaces.create.mockResolvedValueOnce(workspace)
+    const sessionId = await service.newWorkspaceSession()
+    expect(ctx.workspaces.create).toHaveBeenCalledWith({ path: '/chosen/new-project' })
+    expect(ctx.sessions.create).toHaveBeenCalledWith({ workspaceId: workspace.workspaceId })
+    expect(saved().state.sessionBindings[sessionId]).toBe('writer')
+    expect(saved().state.hiddenWorkspaces).toEqual({})
+    expect(service.workspaceVisible(workspace.workspaceId)).toBe(true)
+  })
+
   it('keeps the sidebar state unchanged when a workbench enters the foreground', async () => {
     const { service, ctx } = await fixture()
     sidebarWide = true
@@ -459,7 +501,7 @@ describe('desktop workbench client navigation', () => {
 
   it('migrates legacy market identities to repository identities and preserves owned data', async () => {
     const legacy = { ...emptyState(), added: ['ming-life'], pinned: ['ming-life'], favorites: ['ming-life'], active: 'ming-life',
-      sessionBindings: { old: 'ming-life' }, recentSessions: { 'ming-life': 'old' }, notes: { 'ming-life': 'Keep me' } }
+      sessionBindings: { old: 'ming-life' }, recentSessions: { 'ming-life': 'old' }, notes: { 'ming-life': 'Keep me' }, hiddenWorkspaces: { 'ming-life': ['project-1'] } }
     const { service, request, saved } = await fixture(legacy)
     service.remoteCatalog = [{ id: 'dataelement/dsh-ming-life', workbenchId: 'wb-dataelement-dsh-ming-life', legacyWorkbenchIds: ['ming-life'],
       owner: 'dataelement', url: 'https://github.com/dataelement/dsh-ming-life', name: 'Ming Life', categoryName: '其他',
@@ -471,7 +513,8 @@ describe('desktop workbench client navigation', () => {
     expect(request).toHaveBeenCalledWith('/api/desktop-workbenches/state/migrate', expect.objectContaining({ method: 'POST' }))
     expect(saved()).toEqual({ revision: 1, state: { ...legacy,
       added: ['dataelement/dsh-ming-life'], pinned: ['dataelement/dsh-ming-life'], favorites: ['dataelement/dsh-ming-life'], active: 'dataelement/dsh-ming-life',
-      sessionBindings: { old: 'dataelement/dsh-ming-life' }, recentSessions: { 'dataelement/dsh-ming-life': 'old' }, notes: { 'dataelement/dsh-ming-life': 'Keep me' } } })
+      sessionBindings: { old: 'dataelement/dsh-ming-life' }, recentSessions: { 'dataelement/dsh-ming-life': 'old' }, notes: { 'dataelement/dsh-ming-life': 'Keep me' },
+      hiddenWorkspaces: { 'dataelement/dsh-ming-life': ['project-1'] } } })
   })
 
   it('tracks the market as the current sidebar destination and clears it when a workbench opens', async () => {
