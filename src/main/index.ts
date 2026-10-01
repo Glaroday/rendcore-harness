@@ -89,6 +89,7 @@ import { secureWindow } from './security'
 import { SafeModeFrame } from './safe-mode-frame'
 import { desktopResourceUrl, installDesktopProtocol, registerDesktopScheme, SAFE_MODE_PAGE } from './desktop-protocol'
 import { ensureLaunchRoot } from './state/launch-root'
+import { initializeDesktopInstall } from './state/desktop-startup-install'
 import {
   listInstalledProfilePlugins,
   pruneUnresolvableProfileBundles
@@ -3549,7 +3550,13 @@ if (isDaemonLaunch(process.env, process.platform)) {
     // and the splash instead of blocking the main process right before the
     // Harness spawn. Only the instance that will actually launch pays for it.
     void prewarmShellEnvironment()
-    initializeDesktopService()
+    // Classify before DesktopService creates installation.json and bootstrap
+    // creates launch-root; either path would otherwise look like legacy data.
+    initializeDesktopInstall({
+      userDataPath: app.getPath('userData'),
+      appVersion: app.getVersion(),
+      developmentBuild
+    }, initializeDesktopService)
     app.on('second-instance', (_event, argv) => {
       if (!isUserInitiatedInstance(argv)) return
       if (shouldStartInSafeMode(argv)) {
