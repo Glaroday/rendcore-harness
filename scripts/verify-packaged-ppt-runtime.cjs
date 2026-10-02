@@ -71,17 +71,17 @@ module.exports = async function verifyPackagedPptRuntime(context) {
   ]
   const appRoot = candidates.find(candidate => require('node:fs').existsSync(candidate))
   if (!appRoot) throw new Error('Cannot locate the packaged physical runtime')
+  // The packaged Electron executable is the only Node runtime the app ships;
+  // macOS runs Node work through its Helper, as the Desktop does.
   const executable = process.platform === 'win32'
     ? path.join(context.appOutDir, product + '.exe')
-    : path.join(appRoot, 'node_modules', 'node', 'bin', 'node')
-  if (!require('node:fs').existsSync(executable)) throw new Error('Cannot locate the packaged Node runtime')
-  // Harness needs physical package paths. Electron's ASAR-aware filesystem
-  // would incorrectly accept generated plugins left entirely in app.asar.
+    : path.join(macContents, 'Frameworks', product + ' Helper.app', 'Contents', 'MacOS', product + ' Helper')
+  if (!require('node:fs').existsSync(executable)) throw new Error('Cannot locate the packaged Electron executable')
+  // Harness needs physical package paths, so verify appRoot (the unpacked
+  // directory) rather than paths inside app.asar.
   await execFileAsync(executable, [__filename, '--verify-runtime', appRoot], {
     cwd: appRoot,
-    env: process.platform === 'win32'
-      ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
-      : process.env,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     timeout: 120_000,
     maxBuffer: 1024 * 1024
   })

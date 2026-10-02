@@ -89,6 +89,7 @@ import { secureWindow } from './security'
 import { SafeModeFrame } from './safe-mode-frame'
 import { desktopResourceUrl, installDesktopProtocol, registerDesktopScheme, SAFE_MODE_PAGE } from './desktop-protocol'
 import { ensureLaunchRoot } from './state/launch-root'
+import { electronNodeExecutable } from './runtime/electron-node-executable'
 import { initializeDesktopInstall } from './state/desktop-startup-install'
 import { forgetRemovedWorkbenchMarketInstall } from './state/workbench-market-recovery'
 import {
@@ -549,8 +550,7 @@ function dshEntryPath(): string {
 }
 
 function bundledNodePath(): string {
-  if (process.platform === 'win32') return process.execPath
-  return join(bundledRuntimeRoot(), 'node_modules', 'node', 'bin', 'node')
+  return electronNodeExecutable(process.execPath)
 }
 
 /**
@@ -1399,6 +1399,7 @@ function launchHarness(): Promise<void> {
           dshHome,
           nodeExecutablePath: bundledNodePath(),
           pnpmEntryPath: bundledPnpmEntryPath(),
+          pnpmRunnerPath: bundledPnpmRunnerPath(),
           dshEntryPath: dshEntryPath(),
           note: (line) => runtime.note(line),
           reinstallSharedTree: async () => {
@@ -2225,6 +2226,7 @@ async function showPluginRecovery(options?: {
           upgrade: candidate => upgradePluginToGeneration({
             dshHome, pluginName: candidate.packageName, targetVersion: candidate.targetVersion,
             nodeExecutablePath: bundledNodePath(), pnpmEntryPath: bundledPnpmEntryPath(),
+            pnpmRunnerPath: bundledPnpmRunnerPath(),
             note: line => runtime.note(line)
           }),
           remove: plugin => removeProfilePluginCompletely(dshHome, plugin, 'plugin-recovery')
@@ -2945,6 +2947,7 @@ async function showSafeModeManager(initial?: {
             targetVersion: report.upgradeVersion!,
             nodeExecutablePath: bundledNodePath(),
             pnpmEntryPath: bundledPnpmEntryPath(),
+            pnpmRunnerPath: bundledPnpmRunnerPath(),
             note: (line) => runtime.note(line)
           })
           if (res.ok) {
