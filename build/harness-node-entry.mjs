@@ -1,8 +1,9 @@
 import childProcess from 'node:child_process'
 import { syncBuiltinESMExports } from 'node:module'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerHostModuleFallback } from './host-module-fallback.mjs'
-import { registerOfficeEngineResolution } from './office-engine-resolution.mjs'
+import { packagedArchiveRoot, registerOfficeEngineResolution } from './office-engine-resolution.mjs'
 import { enforceWindowsChildProcessHide } from './windows-child-process-hide.mjs'
 
 // On macOS Harness runs inside an Electron utility process (TCC responsibility
@@ -86,6 +87,12 @@ if (!dshEntryPath) {
   process.stdout.write(`[harness-node] loading=${dshEntryPath}\n`)
   process.argv = [process.execPath, dshEntryPath, ...dshArguments]
   try {
+    const archive = packagedArchiveRoot(dshEntryPath)
+    const resources = archive ? dirname(archive) : import.meta.dirname
+    process.env.DSH_DESKTOP_OFFICE_RESOURCES = archive
+      ? join(resources, 'office-runtime')
+      : join(resources, '..', '.build', 'office-runtime')
+    process.env.DSH_DESKTOP_OFFICE_CLI = join(resources, 'office-cli.mjs')
     registerHostModuleFallback(dshEntryPath)
     // Packages load through app.asar; the Office engine must resolve to its
     // unpacked directory so the OS can spawn it.
