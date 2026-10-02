@@ -177,7 +177,14 @@ describe('GitHub release contract', () => {
 
     expect(packageJson.build.artifactName).toBe('dsh-desktop-${os}-${arch}.${ext}')
     expect(packageJson.build.asar).toBe(true)
-    expect(packageJson.build.asarUnpack).toContain('node_modules/**/*')
+    // JavaScript stays in app.asar; only files the OS loads or executes unpack.
+    expect(packageJson.build.asarUnpack).not.toContain('node_modules/**/*')
+    expect(packageJson.build.asarUnpack).toEqual(expect.arrayContaining([
+      '**/*.{node,dylib,dll,so,exe}',
+      '**/spawn-helper',
+      '**/@vscode/ripgrep-*/bin/rg',
+      'node_modules/@deepseek-ai/libreoffice-kit-*/**/*'
+    ]))
     expect(packageJson.build.extraResources).toContainEqual({
       from: 'build/app-icon.png',
       to: 'icon.png'
@@ -194,6 +201,11 @@ describe('GitHub release contract', () => {
       to: 'host-module-fallback.mjs'
     })
     expect(harnessNodeEntry).toContain("from './host-module-fallback.mjs'")
+    expect(packageJson.build.extraResources).toContainEqual({
+      from: 'build/office-engine-resolution.mjs',
+      to: 'office-engine-resolution.mjs'
+    })
+    expect(harnessNodeEntry).toContain("from './office-engine-resolution.mjs'")
     expect(windowsHiddenConsole).toContain('export function createHiddenConsole')
     expect(packageJson.build.extraResources).toContainEqual({
       from: 'build/windows-child-process-hide.mjs',

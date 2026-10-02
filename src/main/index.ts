@@ -1,6 +1,5 @@
 import { initializeDesktopService, desktopDiagnostics } from './desktop-service'
 import { applyMacosWindowBackdrop } from './macos-window-backdrop'
-import { runtimePackageRoot } from './runtime-package-root'
 import { checkBlockingPluginUpdates, selectPluginRecoveryTarget, PluginRecoveryEvidence, planPluginRecovery, runPluginRecoveryPlan, type PluginRecoveryCheck } from './plugin-recovery-market'
 import { RepairAgentService, type CrashEvidence } from './repair-agent'
 import { spawn } from 'node:child_process'
@@ -541,8 +540,14 @@ async function syncNativeTheme(window: BrowserWindow): Promise<void> {
   applyWindowChromeTheme(window, isDark)
 }
 
+/**
+ * Where the bundled Harness and its packages load from: app.asar when packaged.
+ * Every consumer runs on the Electron runtime, which reads the archive; native
+ * files the OS executes are unpacked and reached through their own resolution
+ * (node-pty, ripgrep, and the Office engine hook in harness-node-entry).
+ */
 function bundledRuntimeRoot(): string {
-  return runtimePackageRoot(app.getAppPath(), app.isPackaged)
+  return app.getAppPath()
 }
 
 function dshEntryPath(): string {

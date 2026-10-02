@@ -2,6 +2,7 @@ import childProcess from 'node:child_process'
 import { syncBuiltinESMExports } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { registerHostModuleFallback } from './host-module-fallback.mjs'
+import { registerOfficeEngineResolution } from './office-engine-resolution.mjs'
 import { enforceWindowsChildProcessHide } from './windows-child-process-hide.mjs'
 
 // On macOS Harness runs inside an Electron utility process (TCC responsibility
@@ -86,6 +87,9 @@ if (!dshEntryPath) {
   process.argv = [process.execPath, dshEntryPath, ...dshArguments]
   try {
     registerHostModuleFallback(dshEntryPath)
+    // Packages load through app.asar; the Office engine must resolve to its
+    // unpacked directory so the OS can spawn it.
+    registerOfficeEngineResolution(dshEntryPath)
     // Harness 0.1.5 gates its CLI behind `if (import.meta.main)` and exports
     // `runCli`. This file imports the entry rather than being it, so that guard
     // is false here and a plain import would load the module, run nothing, and

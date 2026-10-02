@@ -19,14 +19,18 @@ afterEach(async () => {
 })
 
 // Only macOS launches the shell through node-pty's spawn-helper binary.
-describe.runIf(process.platform === 'darwin')('node-pty loaded from app.asar.unpacked', () => {
-  it('starts a terminal instead of resolving spawn-helper under app.asar.unpacked.unpacked', async () => {
+describe.runIf(process.platform === 'darwin')('node-pty in the packaged asar layout', () => {
+  it('starts a terminal when loaded from app.asar with its native files unpacked', async () => {
+    // Packaged Harness loads node-pty through app.asar while asarUnpack keeps
+    // spawn-helper and pty.node in app.asar.unpacked. Upstream node-pty maps
+    // the one to the other, so this layout needs no node-pty patch.
     const root = await mkdtemp(join(tmpdir(), 'dsh-node-pty-'))
     roots.push(root)
-    // Packaged Harness resolves dependencies from this physical directory.
-    const unpacked = join(root, 'DSH Desktop.app', 'Contents', 'Resources', 'app.asar.unpacked', 'node_modules', 'node-pty')
-    await cp(nodePtyRoot, unpacked, { recursive: true })
-    const pty = require(unpacked) as NodePty
+    const resources = join(root, 'DSH Desktop.app', 'Contents', 'Resources')
+    const packaged = join(resources, 'app.asar', 'node_modules', 'node-pty')
+    await cp(nodePtyRoot, packaged, { recursive: true })
+    await cp(join(nodePtyRoot, 'prebuilds'), join(resources, 'app.asar.unpacked', 'node_modules', 'node-pty', 'prebuilds'), { recursive: true })
+    const pty = require(packaged) as NodePty
 
     const terminal = pty.spawn('/bin/echo', ['dsh-pty-ok'], { cwd: root, env: process.env })
     let output = ''

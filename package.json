@@ -311,7 +311,12 @@
     "productName": "DSH Desktop",
     "asar": true,
     "asarUnpack": [
-      "node_modules/**/*",
+      "**/*.{node,dylib,dll,so,exe}",
+      "**/*.so.*",
+      "**/spawn-helper",
+      "**/@vscode/ripgrep-*/bin/rg",
+      "node_modules/@deepseek-ai/libreoffice-kit-*/**/*",
+      "node_modules/sherpa-onnx-*/**/*",
       ".build/ppt-runtime/packages/**/*"
     ],
     "npmRebuild": false,
@@ -387,6 +392,10 @@
       {
         "from": "build/host-module-fallback.mjs",
         "to": "host-module-fallback.mjs"
+      },
+      {
+        "from": "build/office-engine-resolution.mjs",
+        "to": "office-engine-resolution.mjs"
       },
       {
         "from": "build/windows-hidden-console.mjs",
@@ -485,6 +494,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
-    "afterPack": "scripts/verify-packaged-ppt-runtime.cjs"
+    "afterPack": "scripts/after-pack.cjs"
   }
 }
