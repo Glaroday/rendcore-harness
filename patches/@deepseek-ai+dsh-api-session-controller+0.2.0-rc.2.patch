@@ -117,7 +117,7 @@ index 1ae21e3..b65b36b 100644
  			* synchronous-addressability guarantee as {@link ClientSessions.create}:
  			* on resolution the child is catalogued and may be explicitly retained).
 diff --git a/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js b/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
-index 3b8507e..8d84248 100644
+index 3b8507e..da70b37 100644
 --- a/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
 @@ -5,7 +5,7 @@ import { AssistantStreamAccumulator, ReasoningEffortId, assistantStreamChunks, c
@@ -424,7 +424,15 @@ index 3b8507e..8d84248 100644
  //#endregion
  //#region lib/types/control.js
  /** Live Session projection state with reconnect baselines. */
-@@ -2401,6 +2587,171 @@ const SessionMediaReferences = {
+@@ -2296,6 +2482,7 @@ let SessionSkillCatalog = (() => {
+ 				const scope = live ?? lease?.key;
+ 				try {
+ 					return { skills: (await skillRegistry.list({
++						sessionId,
+ 						cwd,
+ 						scope
+ 					})).filter(isUserInvocable).map((skill) => ({
+@@ -2401,6 +2588,171 @@ const SessionMediaReferences = {
  		}), "session-controller: /api/file");
  	}
  };
@@ -596,7 +604,7 @@ index 3b8507e..8d84248 100644
  //#endregion
  //#region lib/types/archived-session-gate.js
  /**
-@@ -2566,6 +2917,7 @@ let SessionController = (() => {
+@@ -2566,6 +2918,7 @@ let SessionController = (() => {
  	let _openWorkspacePath_decorators;
  	let _workspacePathApplications_decorators;
  	let _rename_decorators;
@@ -604,7 +612,7 @@ index 3b8507e..8d84248 100644
  	let _fork_decorators;
  	let _prompt_decorators;
  	let _attachment_decorators;
-@@ -2588,6 +2940,7 @@ let SessionController = (() => {
+@@ -2588,6 +2941,7 @@ let SessionController = (() => {
  			_openWorkspacePath_decorators = [Remote("openWorkspacePath")];
  			_workspacePathApplications_decorators = [Remote("workspacePathApplications")];
  			_rename_decorators = [Remote("rename")];
@@ -612,7 +620,7 @@ index 3b8507e..8d84248 100644
  			_fork_decorators = [Remote("fork")];
  			_prompt_decorators = [Remote("prompt")];
  			_attachment_decorators = [Remote("attachment")];
-@@ -2707,6 +3060,17 @@ let SessionController = (() => {
+@@ -2707,6 +3061,17 @@ let SessionController = (() => {
  				},
  				metadata: _metadata
  			}, null, _instanceExtraInitializers);
@@ -630,7 +638,7 @@ index 3b8507e..8d84248 100644
  			__esDecorate(this, null, _fork_decorators, {
  				kind: "method",
  				name: "fork",
-@@ -2868,10 +3232,12 @@ let SessionController = (() => {
+@@ -2868,10 +3233,12 @@ let SessionController = (() => {
  			this.canOpenPath = internals.canOpenPath ?? (() => config.nativeOpen ?? (internals.openPath !== void 0 || canOpenNativePath()));
  			ctx.plugin(SessionFileReferences);
  			ctx.plugin(SessionMediaReferences);
@@ -644,7 +652,7 @@ index 3b8507e..8d84248 100644
  			});
  			ctx.on("session/disposed", (session) => {
  				ctx.emit("api-session/removed", session.id);
-@@ -3077,6 +3443,10 @@ let SessionController = (() => {
+@@ -3077,6 +3444,10 @@ let SessionController = (() => {
  		rename(request) {
  			return this.commands.rename(request);
  		}

@@ -155,6 +155,25 @@ export async function apply(ctx) {
     const session = await rpc('session/create', {})
     const catalog = await rpc('skills/list', { sessionId: session.sessionId })
     expect(catalog.skills.filter(skill => skill.modelInvocable).map(skill => skill.name)).toEqual(expect.arrayContaining(['office-docx', 'office-pptx', 'office-xlsx']))
+    const ordinary = await rpc('session/create', {})
+    const togglePpt = async active => {
+      const response = await fetch(new URL('/dsh-ppt/presentation/mode', snapshot.url), {
+        method: 'POST', headers: { Cookie: cookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ payload: { sessionId: session.sessionId, mode: active ? 'ppt' : null } })
+      })
+      const envelope = await response.json()
+      expect(envelope.result?.value?.status, JSON.stringify(envelope)).toBe('ok')
+    }
+    await togglePpt(true)
+    const [templateCatalog, ordinaryCatalog] = await Promise.all([
+      rpc('skills/list', { sessionId: session.sessionId }), rpc('skills/list', { sessionId: ordinary.sessionId })
+    ])
+    expect(templateCatalog.skills.find(skill => skill.name === 'office-pptx')?.modelInvocable).toBe(false)
+    expect(templateCatalog.skills.filter(skill => skill.modelInvocable).map(skill => skill.name)).toEqual(expect.arrayContaining(['office-docx', 'office-xlsx']))
+    expect(ordinaryCatalog.skills.find(skill => skill.name === 'office-pptx')?.modelInvocable).toBe(true)
+    await togglePpt(false)
+    const restored = await rpc('skills/list', { sessionId: session.sessionId })
+    expect(restored.skills.find(skill => skill.name === 'office-pptx')?.modelInvocable).toBe(true)
     await exec(electronExecutable(root), [join(root, 'build/office-cli.mjs'), 'capabilities', '--json'], { cwd: neutral, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000 })
   } finally {
     await runtime.stop()
