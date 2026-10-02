@@ -168,7 +168,12 @@ import {
   shouldOfferWebHomeImport,
   writeSkipDecision
 } from './state/web-home-import'
-import { buildSafeModeViewModel, shouldStartInSafeMode } from './safe-mode'
+import {
+  buildSafeModeViewModel,
+  safeModeBlockingGroupCount,
+  safeModeExitConfirmation,
+  shouldStartInSafeMode
+} from './safe-mode'
 import {
   checkupAllProfilePlugins,
   evaluatePluginMarketCompatibility,
@@ -3511,9 +3516,34 @@ async function bootstrap(): Promise<void> {
       dshHome,
       join(bundledRuntimeRoot(), 'node_modules')
     )
-    if (compatibility.issues.some((issue) => issue.severity === 'blocking')) {
-      void showSafeModeManager().catch(showUnexpectedError)
-      return { ok: false, blocked: true }
+    const locale = harnessLocale()
+    const confirmation = safeModeExitConfirmation(safeModeBlockingGroupCount(compatibility.issues), locale)
+    if (confirmation !== undefined) {
+      // Ask the same question as the manager's restart button. Reopening an
+      // already-open manager instead left this click with no visible effect.
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const options: MessageBoxOptions = {
+        type: 'warning',
+        message: confirmation,
+        buttons: locale === 'zh' ? ['仍然退出', '管理插件'] : ['Exit anyway', 'Manage plugins'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true
+      }
+      const { response } = owner && !owner.isDestroyed()
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options)
+      if (response !== 0) {
+        if (!safeModeManagerVisible) void showSafeModeManager().catch(showUnexpectedError)
+        return { ok: false, blocked: true }
+      }
+    }
+    if (safeModeManagerVisible && safeModeActionResolver !== undefined) {
+      // The open manager owns leaving Safe Mode: its restart action relaunches,
+      // records unresolved findings, and keeps the manager if startup falls
+      // back into Safe Mode.
+      resolveSafeModeAction({ type: 'restart' })
+      return { ok: true }
     }
     resolveSafeModeAction({ type: 'agent' })
     await launchHarness()
