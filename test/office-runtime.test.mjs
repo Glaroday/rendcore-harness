@@ -10,7 +10,7 @@ import { officeTarget, downloadAsset, unpackWheel, prepareOfficeRuntime } from '
 import { HarnessRuntime } from '../src/main/runtime/harness-runtime'
 import { prepareHostPluginSourcesPatch } from '../src/main/state/host-plugin-sources'
 import { ensureSafeModeProfile, SAFE_MODE_PROFILE } from '../src/main/state/safe-mode-profile'
-import { zipSync, strToU8 } from 'fflate'
+import { zipSync, unzipSync, strToU8 } from 'fflate'
 import { electronExecutable } from '../scripts/electron-node-loader.mjs'
 
 const root = resolve(import.meta.dirname, '..')
@@ -68,9 +68,26 @@ describe('Office runtime assembly', () => {
       const { stdout } = await exec(python, ['-I', '-B', checker, join(output, `sample.${extension}`), '--contains', 'Office runtime smoke'])
       expect(JSON.parse(stdout).verdict).toBe('pass')
     }
-    // Reproduce the old Compress-Archive shape to prove the checker distinguishes it.
-    await exec(python, ['-I', '-B', '-c', `import zipfile; from pathlib import Path; p=Path(${JSON.stringify(output)}); source=zipfile.ZipFile(p/'sample.docx'); bad=zipfile.ZipFile(p/'broken.docx','w'); [bad.writestr(n.replace('/',chr(92)),source.read(n)) for n in source.namelist()]; bad.close()`])
-    await expect(exec(python, ['-I', '-B', checker, join(output, 'broken.docx')])).rejects.toMatchObject({ code: 1 })
+    // ZipInfo's constructor normalizes os.sep on Windows. Set filename after
+    // construction so this is truly the malformed Compress-Archive shape.
+    await exec(python, ['-I', '-B', '-c', `
+import zipfile
+from pathlib import Path
+p = Path(${JSON.stringify(output)})
+with zipfile.ZipFile(p / 'sample.docx') as source, zipfile.ZipFile(p / 'broken.docx', 'w') as bad:
+    for name in source.namelist():
+        info = zipfile.ZipInfo()
+        info.filename = name.replace('/', chr(92))
+        bad.writestr(info, source.read(name))
+`])
+    const malformed = unzipSync(await readFile(join(output, 'broken.docx')))
+    expect(Object.keys(malformed)).toContain('word\\document.xml')
+    expect(Object.keys(malformed)).not.toContain('word/document.xml')
+    // Python's reader also normalizes separators on Windows; the strict
+    // preview engine is the portable negative control for this fixture.
+    await expect(exec(electronExecutable(root), [join(root, 'build/office-cli.mjs'), 'convert', '--input', join(output, 'broken.docx'), '--output', join(output, 'broken.pdf')], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000
+    })).rejects.toMatchObject({ code: 1 })
   })
 })
 
