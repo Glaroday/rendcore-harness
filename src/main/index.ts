@@ -1,6 +1,5 @@
 import { initializeDesktopService, desktopDiagnostics } from './desktop-service'
 import { applyMacosWindowBackdrop } from './macos-window-backdrop'
-import { runtimePackageRoot } from './runtime-package-root'
 import { checkBlockingPluginUpdates, selectPluginRecoveryTarget, PluginRecoveryEvidence, planPluginRecovery, runPluginRecoveryPlan, type PluginRecoveryCheck } from './plugin-recovery-market'
 import { RepairAgentService, type CrashEvidence } from './repair-agent'
 import { spawn } from 'node:child_process'
@@ -89,6 +88,7 @@ import { secureWindow } from './security'
 import { SafeModeFrame } from './safe-mode-frame'
 import { desktopResourceUrl, installDesktopProtocol, registerDesktopScheme, SAFE_MODE_PAGE } from './desktop-protocol'
 import { ensureLaunchRoot } from './state/launch-root'
+import { electronNodeExecutable } from './runtime/electron-node-executable'
 import { initializeDesktopInstall } from './state/desktop-startup-install'
 import { forgetRemovedWorkbenchMarketInstall } from './state/workbench-market-recovery'
 import {
@@ -168,7 +168,12 @@ import {
   shouldOfferWebHomeImport,
   writeSkipDecision
 } from './state/web-home-import'
-import { buildSafeModeViewModel, shouldStartInSafeMode } from './safe-mode'
+import {
+  buildSafeModeViewModel,
+  safeModeBlockingGroupCount,
+  safeModeExitConfirmation,
+  shouldStartInSafeMode
+} from './safe-mode'
 import {
   checkupAllProfilePlugins,
   evaluatePluginMarketCompatibility,
@@ -540,8 +545,14 @@ async function syncNativeTheme(window: BrowserWindow): Promise<void> {
   applyWindowChromeTheme(window, isDark)
 }
 
+/**
+ * Where the bundled Harness and its packages load from: app.asar when packaged.
+ * Every consumer runs on the Electron runtime, which reads the archive; native
+ * files the OS executes are unpacked and reached through their own resolution
+ * (node-pty, ripgrep, and the Office engine hook in harness-node-entry).
+ */
 function bundledRuntimeRoot(): string {
-  return runtimePackageRoot(app.getAppPath(), app.isPackaged)
+  return app.getAppPath()
 }
 
 function dshEntryPath(): string {
@@ -549,8 +560,7 @@ function dshEntryPath(): string {
 }
 
 function bundledNodePath(): string {
-  if (process.platform === 'win32') return process.execPath
-  return join(bundledRuntimeRoot(), 'node_modules', 'node', 'bin', 'node')
+  return electronNodeExecutable(process.execPath)
 }
 
 /**
@@ -1399,6 +1409,7 @@ function launchHarness(): Promise<void> {
           dshHome,
           nodeExecutablePath: bundledNodePath(),
           pnpmEntryPath: bundledPnpmEntryPath(),
+          pnpmRunnerPath: bundledPnpmRunnerPath(),
           dshEntryPath: dshEntryPath(),
           note: (line) => runtime.note(line),
           reinstallSharedTree: async () => {
@@ -2225,6 +2236,7 @@ async function showPluginRecovery(options?: {
           upgrade: candidate => upgradePluginToGeneration({
             dshHome, pluginName: candidate.packageName, targetVersion: candidate.targetVersion,
             nodeExecutablePath: bundledNodePath(), pnpmEntryPath: bundledPnpmEntryPath(),
+            pnpmRunnerPath: bundledPnpmRunnerPath(),
             note: line => runtime.note(line)
           }),
           remove: plugin => removeProfilePluginCompletely(dshHome, plugin, 'plugin-recovery')
@@ -2945,6 +2957,7 @@ async function showSafeModeManager(initial?: {
             targetVersion: report.upgradeVersion!,
             nodeExecutablePath: bundledNodePath(),
             pnpmEntryPath: bundledPnpmEntryPath(),
+            pnpmRunnerPath: bundledPnpmRunnerPath(),
             note: (line) => runtime.note(line)
           })
           if (res.ok) {
@@ -3503,9 +3516,34 @@ async function bootstrap(): Promise<void> {
       dshHome,
       join(bundledRuntimeRoot(), 'node_modules')
     )
-    if (compatibility.issues.some((issue) => issue.severity === 'blocking')) {
-      void showSafeModeManager().catch(showUnexpectedError)
-      return { ok: false, blocked: true }
+    const locale = harnessLocale()
+    const confirmation = safeModeExitConfirmation(safeModeBlockingGroupCount(compatibility.issues), locale)
+    if (confirmation !== undefined) {
+      // Ask the same question as the manager's restart button. Reopening an
+      // already-open manager instead left this click with no visible effect.
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const options: MessageBoxOptions = {
+        type: 'warning',
+        message: confirmation,
+        buttons: locale === 'zh' ? ['仍然退出', '管理插件'] : ['Exit anyway', 'Manage plugins'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true
+      }
+      const { response } = owner && !owner.isDestroyed()
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options)
+      if (response !== 0) {
+        if (!safeModeManagerVisible) void showSafeModeManager().catch(showUnexpectedError)
+        return { ok: false, blocked: true }
+      }
+    }
+    if (safeModeManagerVisible && safeModeActionResolver !== undefined) {
+      // The open manager owns leaving Safe Mode: its restart action relaunches,
+      // records unresolved findings, and keeps the manager if startup falls
+      // back into Safe Mode.
+      resolveSafeModeAction({ type: 'restart' })
+      return { ok: true }
     }
     resolveSafeModeAction({ type: 'agent' })
     await launchHarness()

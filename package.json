@@ -24,8 +24,8 @@
   ],
   "scripts": {
     "postinstall": "patch-package && node scripts/install-brand-assets.mjs && install-electron --no",
-    "dev": "npm run ppt:build && electron-vite dev",
-    "build": "npm run ppt:build && electron-vite build",
+    "dev": "npm run office:prepare && npm run ppt:build && electron-vite dev",
+    "build": "npm run office:prepare && npm run ppt:build && electron-vite build",
     "icons:generate": "node scripts/generate-app-icons.mjs",
     "loader:generate": "node scripts/generate-loader-gifs.mjs",
     "preview": "electron-vite preview",
@@ -42,8 +42,9 @@
     "package:mac:x64": "node scripts/verify-target.mjs darwin x64 && npm run build && electron-builder --mac --x64 --publish never",
     "package:win": "node scripts/verify-target.mjs win32 x64 && npm run build && node scripts/electron-builder-windows.mjs --win --x64 --publish never",
     "ppt:build": "node scripts/prepare-ppt-runtime.mjs",
-    "pretest": "npm run ppt:build",
-    "pretest:watch": "npm run ppt:build"
+    "pretest": "npm run office:prepare && npm run ppt:build",
+    "pretest:watch": "npm run office:prepare && npm run ppt:build",
+    "office:prepare": "node scripts/office-runtime/prepare.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.4",
@@ -213,6 +214,7 @@
     "@deepseek-ai/dsh-skill": "0.2.0-rc.2",
     "@deepseek-ai/dsh-skill-badge": "0.2.0-rc.2",
     "@deepseek-ai/dsh-skill-filesystem": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-skill-office": "0.2.0-rc.2",
     "@deepseek-ai/dsh-spill": "0.2.0-rc.2",
     "@deepseek-ai/dsh-spill-local": "0.2.0-rc.2",
     "@deepseek-ai/dsh-spill-policy": "0.2.0-rc.2",
@@ -251,6 +253,7 @@
     "@deepseek-ai/dsh-tool-todo": "0.2.0-rc.2",
     "@deepseek-ai/dsh-tool-web": "0.2.0-rc.2",
     "@deepseek-ai/dsh-tool-workflow": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tool-workspace-dependencies": "0.2.0-rc.2",
     "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
     "@deepseek-ai/dsh-typert-loader": "0.2.0-rc.2",
     "@deepseek-ai/dsh-typert-protocol": "0.2.0-rc.2",
@@ -277,6 +280,7 @@
     "dsh-desktop-hmr-fallback": "file:packages/dsh-desktop-hmr-fallback",
     "dsh-desktop-log-bridge": "file:packages/dsh-desktop-log-bridge",
     "dsh-desktop-market-installer": "file:packages/dsh-desktop-market-installer",
+    "dsh-desktop-office": "file:packages/dsh-desktop-office",
     "dsh-desktop-onboarding": "file:packages/dsh-desktop-onboarding",
     "dsh-desktop-preset-transfer": "file:packages/dsh-desktop-preset-transfer",
     "dsh-desktop-workbenches": "file:packages/dsh-desktop-workbenches",
@@ -284,7 +288,6 @@
     "dsh-ppt": "file:packages/ppt-runtime/core",
     "dsh-ppt-composer": "file:packages/ppt-runtime/adapter",
     "electron-updater": "^6.8.9",
-    "node": "24.9.0",
     "pnpm": "10.34.5",
     "qrcode": "^1.5.4",
     "react": "18.3.1",
@@ -299,7 +302,9 @@
     "electron": "43.0.0",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
+    "fflate": "0.8.3",
     "patch-package": "^8.0.1",
+    "tar": "7.5.22",
     "typescript": "5.9.3",
     "vitest": "^4.1.10",
     "yaml": "^2.8.3"
@@ -312,7 +317,12 @@
     "productName": "DSH Desktop",
     "asar": true,
     "asarUnpack": [
-      "node_modules/**/*",
+      "**/*.{node,dylib,dll,so,exe}",
+      "**/*.so.*",
+      "**/spawn-helper",
+      "**/@vscode/ripgrep-*/bin/rg",
+      "node_modules/@deepseek-ai/libreoffice-kit-*/**/*",
+      "node_modules/sherpa-onnx-*/**/*",
       ".build/ppt-runtime/packages/**/*"
     ],
     "npmRebuild": false,
@@ -390,6 +400,10 @@
         "to": "host-module-fallback.mjs"
       },
       {
+        "from": "build/office-engine-resolution.mjs",
+        "to": "office-engine-resolution.mjs"
+      },
+      {
         "from": "build/windows-hidden-console.mjs",
         "to": "windows-hidden-console.mjs"
       },
@@ -436,6 +450,14 @@
       {
         "from": "build/community-wechat-qr.png",
         "to": "community-wechat-qr.png"
+      },
+      {
+        "from": ".build/office-runtime",
+        "to": "office-runtime"
+      },
+      {
+        "from": "build/office-cli.mjs",
+        "to": "office-cli.mjs"
       }
     ],
     "publish": [
@@ -461,7 +483,6 @@
     },
     "win": {
       "icon": "build/icon.ico",
-      "files": ["!node_modules/node/**/*"],
       "verifyUpdateCodeSignature": true,
       "signtoolOptions": {
         "publisherName": "Beijing Shuju Xiangsu Intelligence Technology Co., Ltd.",
@@ -487,6 +508,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
-    "afterPack": "scripts/verify-packaged-ppt-runtime.cjs"
+    "afterPack": "scripts/after-pack.cjs"
   }
 }

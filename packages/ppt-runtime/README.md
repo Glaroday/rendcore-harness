@@ -38,6 +38,8 @@ The legacy on-disk `kimi-ppt` directory is deliberately retained to preserve ses
 
 PPT remains preinstalled. Its automatic instructions are scoped to sessions where the user enabled the PPT button.
 
+Ordinary conversations use the upstream `office-pptx` skill for general authoring and edits. While PPT mode is active, the skill registry resolves the current session's invocation policy on every catalog and body read, keeping `office-pptx` unavailable to automatic model calls while leaving Word/Excel and explicit user invocation available. The template route retains its PPTD tools and selected template; validation/export failures do not trigger a switch to python-pptx. Disabling PPT mode restores the general skill, including after cached reads. The host catalog carries the durable session ID before Agent activation, and the policy listener is removed with this plugin.
+
 ### Personal PPT templates
 
 The chooser's **My templates** tab accepts PPTX files with the configured slide limit (40 by default). Uploads use the Host's shared transport and archive resource limits. They produce page previews and conversion diagnostics. **Save template** registers the reviewed file in the current Desktop profile; new sessions and restarts read the same library. Identical source bytes resolve to the saved template. Users can rename or remove entries; generated task projects stay available.
