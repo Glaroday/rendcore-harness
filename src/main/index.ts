@@ -56,7 +56,8 @@ import {
 import {
   disableProfilePlugin,
   enableProfilePlugin,
-  listDisabledProfilePlugins
+  listDisabledProfilePlugins,
+  reconcileMarketBundleSwitches
 } from './state/plugin-disable'
 import {
   inspectProfileCompatibility,
@@ -1374,6 +1375,30 @@ async function enterMigrationSafeRecovery(
   })
 }
 
+/**
+ * Pin a market switch that Harness would otherwise use to skip a bundle the
+ * profile still declares: the bundle never composes, so the plugin has no
+ * loader rows left for the market's own toggle to flip and cannot be switched
+ * back on from any surface. Runs with Harness stopped, before the launch that
+ * would skip the bundle again; see reconcileMarketBundleSwitches for why the
+ * user patch layer is where the switch has to end up.
+ */
+async function reconcileStuckMarketSwitches(dshHome: string): Promise<void> {
+  try {
+    const repaired = await reconcileMarketBundleSwitches(dshHome)
+    if (repaired.length === 0) return
+    runtime.note(
+      `[desktop] pinned unreachable market switch(es) into the patch layer: ${repaired
+        .map((entry) => `${entry.name} (${entry.rows.join(', ')})`)
+        .join('; ')}`
+    )
+  } catch (error) {
+    runtime.note(
+      `[desktop] market switch reconciliation failed: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+}
+
 function launchHarness(): Promise<void> {
   if (harnessLaunchOperation) return harnessLaunchOperation
 
@@ -1463,6 +1488,7 @@ function launchHarness(): Promise<void> {
     maintenanceRecoveryLocked = false
     maintenanceAllowedRestoreId = undefined
     runtime.note('[desktop] profile maintenance done')
+    await reconcileStuckMarketSwitches(dshHome)
     await refreshMigrationRecoveryLock(dshHome)
     void auditInstalledLaunchAgents(dshHome)
       .then(() => {

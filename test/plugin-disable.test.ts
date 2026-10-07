@@ -9,7 +9,8 @@ import {
   enableProfilePlugin,
   forgetMarketDisable,
   listDisabledProfilePlugins,
-  patchLayerDisabledRows
+  patchLayerDisabledRows,
+  reconcileMarketBundleSwitches
 } from '../src/main/state/plugin-disable'
 
 const TEMPLATE = `# Your patch layer for this dsh profile, applied after every bundle layer:
@@ -178,5 +179,112 @@ describe('profile plugin disable', () => {
     expect(await disableProfilePlugin(dshHome, 'dsh-proxy-routing')).toMatchObject({ ok: false, reason: 'market-state' })
     expect(await disableProfilePlugin(dshHome, 'dsh-client-only')).toMatchObject({ ok: false, reason: 'market-state' })
     expect(await readFile(statePath, 'utf8')).toBe('{ not json')
+  })
+})
+
+describe('market bundle switch reconciliation', () => {
+  const root = join(__dirname, '.temp-market-bundle-switch')
+  const dshHome = join(root, 'dsh-home')
+  const profile = join(dshHome, 'profiles', 'web')
+  const patchPath = join(profile, 'cordis.patch.yml')
+  const statePath = join(profile, '.dsh-market', 'state.json')
+
+  async function writeProfileManifest(bundles: string[]): Promise<void> {
+    await writeFile(join(profile, 'package.json'), JSON.stringify({
+      name: 'dsh-profile-web',
+      dependencies: {},
+      ...(bundles.length === 0 ? {} : { dsh: { profile: { bundles } } })
+    }))
+  }
+
+  async function plugin(name: string, patch: string): Promise<void> {
+    const directory = join(profile, 'node_modules', name)
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'package.json'), JSON.stringify({
+      name,
+      version: '1.0.0',
+      dsh: { bundle: { patch: './cordis.patch.yml' } }
+    }))
+    await writeFile(join(directory, 'cordis.patch.yml'), patch)
+  }
+
+  async function disabledPackages(): Promise<string[]> {
+    return (JSON.parse(await readFile(statePath, 'utf8')) as { disabled: string[] }).disabled
+  }
+
+  /** The shape dsh-builtin-browser ships: a config row and a !!js expression. */
+  const CONFIG_BUNDLE = "- insert:\n    - id: browser\n      name: dsh-browser/browser\n    - id: tool-browser\n      name: dsh-browser/tool-browser\n      config: {}\n"
+  const PLAIN_BUNDLE = "- insert:\n    - id: modsearch\n      name: '@liustack/modsearch'\n"
+
+  beforeEach(async () => {
+    await mkdir(join(profile, '.dsh-market'), { recursive: true })
+    await writeFile(patchPath, `${TEMPLATE.replace('[]\n', '')}- id: mcp-coaligne\n  disabled: false\n`)
+    await writeFile(statePath, JSON.stringify({ disabled: [], region: 'china', regionAuto: true }))
+  })
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('pins a stuck switch onto the rows the profile still composes', async () => {
+    await writeProfileManifest(['dsh-browser'])
+    await plugin('dsh-browser', CONFIG_BUNDLE)
+    await writeFile(statePath, JSON.stringify({ disabled: ['dsh-browser'], region: 'china', regionAuto: true }))
+
+    expect(await reconcileMarketBundleSwitches(dshHome)).toEqual([
+      { name: 'dsh-browser', rows: ['browser', 'tool-browser'] }
+    ])
+    expect(await disabledPackages()).toEqual([])
+    expect(parse(await readFile(patchPath, 'utf8'))).toEqual([
+      { id: 'mcp-coaligne', disabled: false },
+      { id: 'browser', disabled: true },
+      { id: 'tool-browser', disabled: true }
+    ])
+    // The switch is off in exactly one layer now, and the row layer is the one
+    // the market's own enable path flips.
+    expect(await reconcileMarketBundleSwitches(dshHome)).toEqual([])
+  })
+
+  it('leaves a pure-insert bundle to the market, which hot-mounts it', async () => {
+    await writeProfileManifest(['@liustack/modsearch'])
+    await plugin('@liustack/modsearch', PLAIN_BUNDLE)
+    await writeFile(statePath, JSON.stringify({ disabled: ['@liustack/modsearch'] }))
+    const before = await readFile(patchPath, 'utf8')
+
+    expect(await reconcileMarketBundleSwitches(dshHome)).toEqual([])
+    expect(await disabledPackages()).toEqual(['@liustack/modsearch'])
+    expect(await readFile(patchPath, 'utf8')).toBe(before)
+  })
+
+  it('leaves a switch the profile no longer declares alone', async () => {
+    await writeProfileManifest([])
+    await plugin('dsh-browser', CONFIG_BUNDLE)
+    await writeFile(statePath, JSON.stringify({ disabled: ['dsh-browser'] }))
+    const before = await readFile(patchPath, 'utf8')
+
+    expect(await reconcileMarketBundleSwitches(dshHome)).toEqual([])
+    expect(await disabledPackages()).toEqual(['dsh-browser'])
+    expect(await readFile(patchPath, 'utf8')).toBe(before)
+  })
+
+  it('refuses a disable-carrier, whose patch speaks for another plugin', async () => {
+    await writeProfileManifest(['dsh-carrier'])
+    await plugin('dsh-carrier', `${PLAIN_BUNDLE}- id: session-persistence-jsonl\n  disabled: true\n`)
+    await writeFile(statePath, JSON.stringify({ disabled: ['dsh-carrier'] }))
+    const before = await readFile(patchPath, 'utf8')
+
+    expect(await reconcileMarketBundleSwitches(dshHome)).toEqual([])
+    expect(await disabledPackages()).toEqual(['dsh-carrier'])
+    expect(await readFile(patchPath, 'utf8')).toBe(before)
+  })
+
+  it('leaves an unreadable bundle patch alone', async () => {
+    await writeProfileManifest(['dsh-broken-bundle'])
+    await plugin('dsh-broken-bundle', PLAIN_BUNDLE)
+    await rm(join(profile, 'node_modules', 'dsh-broken-bundle', 'cordis.patch.yml'))
+    await writeFile(statePath, JSON.stringify({ disabled: ['dsh-broken-bundle'] }))
+
+    expect(await reconcileMarketBundleSwitches(dshHome)).toEqual([])
+    expect(await disabledPackages()).toEqual(['dsh-broken-bundle'])
   })
 })
