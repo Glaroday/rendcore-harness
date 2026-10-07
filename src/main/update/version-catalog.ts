@@ -2,24 +2,13 @@ import type { AvailableRelease } from '../../shared/contracts'
 
 export type { AvailableRelease }
 
-/**
- * RendCore Harness ships from its own GitHub repository, so every update URL
- * below resolves against that repository instead of an upstream domain. The
- * version index is GitHub's release list: this project has no separate
- * versions.json manifest to keep in sync.
- */
-export const RELEASE_REPOSITORY = 'Glaroday/rendcore-harness'
-export const RELEASE_TAG_PREFIX = 'v'
-
-/** Latest release assets, used when no mirror is configured. */
-export const STABLE_FEED_URL = `https://github.com/${RELEASE_REPOSITORY}/releases/latest/download/`
-export const VERSION_INDEX_URL = `https://api.github.com/repos/${RELEASE_REPOSITORY}/releases?per_page=100`
+export const STABLE_FEED_URL = 'https://dshdesktop.com/updates/latest/'
+export const VERSION_INDEX_URL = 'https://dshdesktop.com/updates/versions.json'
 
 const INDEX_TIMEOUT_MS = 8_000
 
-/** A per-release generic feed: that release's own latest.yml and installer. */
 export function archiveFeedUrl(version: string): string {
-  return `https://github.com/${RELEASE_REPOSITORY}/releases/download/${RELEASE_TAG_PREFIX}${version}/`
+  return `https://dshdesktop.com/updates/archive/${version}/`
 }
 
 /** Split "1.2.3-rc.1" into ([1,2,3], "rc.1"). Non-numeric segments read as 0. */
@@ -84,36 +73,24 @@ function comparePrerelease(left: string, right: string): -1 | 0 | 1 {
   return 0
 }
 
-/**
- * Map GitHub's release list onto the picker's shape. Drafts are skipped, a tag
- * has to look like a version, and the release only counts when it carries the
- * `latest.yml` the generic feed needs — without it an install would have
- * nothing to fetch.
- */
-export function parseGitHubReleases(raw: unknown): AvailableRelease[] {
-  if (!Array.isArray(raw)) return []
-  return raw.flatMap((entry) => {
-    if (typeof entry !== 'object' || entry === null) return []
-    const record = entry as Record<string, unknown>
-    if (record.draft === true) return []
-    const tag = typeof record.tag_name === 'string' ? record.tag_name.trim() : ''
-    if (!tag) return []
-    const version = tag.startsWith(RELEASE_TAG_PREFIX) ? tag.slice(RELEASE_TAG_PREFIX.length) : tag
-    if (!/^\d/.test(version)) return []
-    const assets = Array.isArray(record.assets) ? record.assets : []
-    const hasFeed = assets.some(
-      (asset) =>
-        typeof asset === 'object' &&
-        asset !== null &&
-        (asset as Record<string, unknown>).name === 'latest.yml'
-    )
-    if (!hasFeed) return []
-    return [{
-      version,
-      tag,
-      archiveUrl: `https://github.com/${RELEASE_REPOSITORY}/releases/download/${tag}/`
-    }]
-  })
+function isRelease(value: unknown): value is AvailableRelease {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.version === 'string' &&
+    record.version.length > 0 &&
+    typeof record.tag === 'string' &&
+    record.tag.length > 0 &&
+    typeof record.archiveUrl === 'string' &&
+    record.archiveUrl.length > 0
+  )
+}
+
+export function parseVersionIndex(raw: unknown): AvailableRelease[] {
+  if (typeof raw !== 'object' || raw === null) return []
+  const versions = (raw as { versions?: unknown }).versions
+  if (!Array.isArray(versions)) return []
+  return versions.filter(isRelease)
 }
 
 export async function fetchAvailableReleases(
@@ -123,17 +100,11 @@ export async function fetchAvailableReleases(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), INDEX_TIMEOUT_MS)
   try {
-    const response = await fetchImpl(VERSION_INDEX_URL, {
-      signal: controller.signal,
-      headers: {
-        accept: 'application/vnd.github+json',
-        'user-agent': 'rendcore-harness'
-      }
-    })
+    const response = await fetchImpl(VERSION_INDEX_URL, { signal: controller.signal })
     if (!response.ok) {
       throw new Error(`Version index request failed: ${response.status}`)
     }
-    const releases = parseGitHubReleases(await response.json())
+    const releases = parseVersionIndex(await response.json())
     return releases
       .filter((release) => compareVersions(release.version, currentVersion) !== 0)
       .sort((a, b) => compareVersions(b.version, a.version))
