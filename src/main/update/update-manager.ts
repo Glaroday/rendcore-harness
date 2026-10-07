@@ -4,6 +4,14 @@ import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
 import electronUpdater from 'electron-updater'
 import type { UpdateStatus } from '../../shared/contracts'
 import {
+  DEFAULT_UPDATE_FEED_CONFIG,
+  readUpdateFeedConfig,
+  resetUpdateFeedConfig,
+  writeUpdateFeedConfig,
+  type UpdateFeedConfig,
+  type UpdateFeedSettings
+} from './update-feed'
+import {
   AUTO_INSTALL_ON_APP_QUIT,
   shouldCheckAfterResume,
   supportsAutoUpdates,
@@ -25,8 +33,7 @@ import {
 import {
   archiveFeedUrl,
   compareVersions,
-  fetchAvailableReleases,
-  STABLE_FEED_URL
+  fetchAvailableReleases
 } from './version-catalog'
 
 const { autoUpdater } = electronUpdater
@@ -47,6 +54,8 @@ let skippedVersion: string | undefined
 let skipLoaded = false
 let manualCheck = false
 let pendingDowngrade = false
+let updateFeedConfig: UpdateFeedConfig = { feedUrls: [], fallbackToGitHub: true }
+let activeMirrorIndex = -1
 let selectedUpdateVersion: string | undefined
 
 export function getUpdateStatus(): UpdateStatus {
@@ -56,6 +65,7 @@ export function getUpdateStatus(): UpdateStatus {
 export function registerUpdateHandlers(): void {
   if (handlersRegistered) return
   handlersRegistered = true
+  updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:check', () => checkForUpdates(true))
   ipcMain.handle('updates:install', () => installDownloadedUpdate())
@@ -65,6 +75,17 @@ export function registerUpdateHandlers(): void {
   ipcMain.handle('updates:install-version', (_event, version: unknown) =>
     installSpecificVersion(version)
   )
+  ipcMain.handle('updates:config:get', () => updateFeedSettings())
+  ipcMain.handle('updates:config:set', async (_event, value: unknown) => {
+    updateFeedConfig = await writeUpdateFeedConfig(app.getPath('userData'), parseFeedSettings(value))
+    configureFirstFeed()
+    return updateFeedSettings()
+  })
+  ipcMain.handle('updates:config:reset', async () => {
+    updateFeedConfig = await resetUpdateFeedConfig(app.getPath('userData'))
+    configureFirstFeed()
+    return updateFeedSettings()
+  })
 }
 
 function skipFile(): string {
@@ -149,7 +170,9 @@ export async function checkForUpdates(manual = false): Promise<UpdateStatus> {
     autoUpdater.allowPrerelease = isPrereleaseVersion(policy.version)
     autoUpdater.allowDowngrade = false
     const result = await autoUpdater.checkForUpdates()
-    if (result?.updateInfo.version !== policy.version) throw new Error('Update archive does not match the selected version')
+    if (result?.updateInfo.version !== policy.version) {
+      throw new Error('Update archive does not match the selected version')
+    }
   })()
 
   try {
@@ -220,7 +243,7 @@ export async function installSpecificVersion(version: unknown): Promise<UpdateSt
     scheduleReset()
   } finally {
     checkPromise = undefined
-    autoUpdater.setFeedURL({ provider: 'generic', url: STABLE_FEED_URL })
+    configureFirstFeed()
     autoUpdater.allowDowngrade = false
     pendingDowngrade = false
     autoUpdater.allowPrerelease = false
@@ -254,6 +277,8 @@ export function stopUpdateManager(): void {
 }
 
 function configureUpdater(): void {
+  updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
+  configureFirstFeed(false)
   // The download is ours to start: an update the user skipped should not be
   // fetched at all, and update-available is the only place that is known.
   autoUpdater.autoDownload = false
@@ -273,7 +298,7 @@ function configureUpdater(): void {
     transition({ type: 'check', manual: status.manual })
   )
   autoUpdater.on('update-available', (info) => {
-    if (info.version !== selectedUpdateVersion) {
+    if (selectedUpdateVersion !== undefined && info.version !== selectedUpdateVersion) {
       transition({ type: 'error', message: 'Update archive does not match the selected version' })
       return
     }
@@ -299,6 +324,68 @@ function configureUpdater(): void {
   autoUpdater.on('error', (error) => {
     transition({ type: 'error', message: errorMessage(error) })
     if (status.manual) scheduleReset()
+  })
+}
+
+function updateFeedSettings(): UpdateFeedSettings & { defaults: string[] } {
+  return {
+    mirrors: [...updateFeedConfig.feedUrls],
+    fallbackToGitHub: updateFeedConfig.fallbackToGitHub,
+    defaults: [...DEFAULT_UPDATE_FEED_CONFIG.feedUrls]
+  }
+}
+
+function parseFeedSettings(value: unknown): UpdateFeedSettings {
+  if (!value || typeof value !== 'object') throw new Error('Invalid update mirror settings.')
+  const raw = value as { mirrors?: unknown; fallbackToGitHub?: unknown }
+  if (!Array.isArray(raw.mirrors) || raw.mirrors.some((mirror) => typeof mirror !== 'string')) {
+    throw new Error('Update mirrors must be an array of URLs.')
+  }
+  return {
+    mirrors: raw.mirrors.map((mirror) => mirror.trim()).filter(Boolean),
+    fallbackToGitHub: raw.fallbackToGitHub !== false
+  }
+}
+
+function configureFirstFeed(applyFeed = true): void {
+  activeMirrorIndex = updateFeedConfig.feedUrls.length > 0 ? 0 : -1
+  if (!applyFeed) return
+  const first = updateFeedConfig.feedUrls[0]
+  if (first) autoUpdater.setFeedURL({ provider: 'generic', url: first })
+  else configureGitHubFeed()
+}
+
+async function checkUsingConfiguredFeeds(): Promise<unknown> {
+  try {
+    return await autoUpdater.checkForUpdates()
+  } catch (firstError) {
+    let lastError: unknown = firstError
+    for (let index = activeMirrorIndex + 1; index < updateFeedConfig.feedUrls.length; index += 1) {
+      const feed = updateFeedConfig.feedUrls[index]
+      if (!feed) continue
+      autoUpdater.setFeedURL({ provider: 'generic', url: feed })
+      activeMirrorIndex = index
+      try {
+        return await autoUpdater.checkForUpdates()
+      } catch (error) {
+        lastError = error
+      }
+    }
+    if (updateFeedConfig.fallbackToGitHub && activeMirrorIndex >= 0) {
+      configureGitHubFeed()
+      activeMirrorIndex = -1
+      return autoUpdater.checkForUpdates()
+    }
+    throw lastError
+  }
+}
+
+function configureGitHubFeed(): void {
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'Glaroday',
+    repo: 'rendcore-harness',
+    releaseType: 'release'
   })
 }
 

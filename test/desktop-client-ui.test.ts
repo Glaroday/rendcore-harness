@@ -96,32 +96,38 @@ describe('DSH Desktop client slot occupants', () => {
       'sidebar.workspaces.session.menu.item',
       'sidebar.workspaces.session.menu.item'
     ])
-    // Desktop toolbar styles have an owned lifetime; branding stays in currentColor.
-    expect(appended).toHaveLength(1)
-    expect(appended[0]?.textContent).toContain("[data-dsh-preset-search]")
+    // Brand styles install once; the toolbar styles keep an owned lifetime.
+    expect(appended).toHaveLength(2)
+    expect(appended[0]?.textContent).toContain('.dshDesktopBrandDark')
+    expect(appended[1]?.textContent).toContain('[data-dsh-preset-search]')
     disposeStyle?.()
     expect(removeStyle).toHaveBeenCalledOnce()
 
     const sidebarName = registrations.find(
       ({ config }) => config.name === 'sidebar.brand.name'
     )!.component({}) as { type: unknown; props: Record<string, unknown> }
-    expect(sidebarName.type).toBe(BrandWordmark)
-    expect(sidebarName.props.includeMark).toBe(false)
+    expect(sidebarName.type).toBe('span')
+    expect(sidebarName.props.children).toEqual(['LQY'])
 
     const sidebarMark = registrations.find(
       ({ config }) => config.name === 'sidebar.brand.mark'
     )!.component({ size: 24 }) as { type: unknown; props: Record<string, unknown> }
     expect(sidebarMark.type).toBe('svg')
     expect(sidebarMark.props.height).toBe(17)
-    const [markPath] = sidebarMark.props.children as Array<{ type: unknown; props: Record<string, unknown> }>
-    if (!markPath) throw new Error('Expected the sidebar brand SVG path')
-    expect(markPath.type).toBe('path')
-    expect(markPath.props.fill).toBe('currentColor')
+    const [lightMark, darkMark] = sidebarMark.props.children as [
+      { type: unknown; props: Record<string, unknown> },
+      { type: unknown; props: Record<string, unknown> }
+    ]
+    expect(lightMark.type).toBe('image')
+    expect(lightMark.props.href).toBe('/dsh-desktop-logo-light.png')
+    expect(darkMark.type).toBe('image')
+    expect(darkMark.props.href).toBe('/dsh-desktop-logo-dark.png')
 
     const heroMark = registrations.find(
       ({ config }) => config.name === 'conversation.hero.brand.mark'
     )!.component({ size: 48 }) as { type: unknown; props: Record<string, unknown> }
-    expect(heroMark.type).toBe(FishLogo)
-    expect(heroMark.props.size).toBe(48)
+    expect(heroMark.type).toBe('img')
+    expect(heroMark.props.width).toBe(48)
+    expect(heroMark.props.alt).toBe('LQY')
   })
 })

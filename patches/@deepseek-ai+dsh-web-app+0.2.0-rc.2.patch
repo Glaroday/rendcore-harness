@@ -1,0 +1,60 @@
+diff --git a/node_modules/@deepseek-ai/dsh-web-app/presets/cordis.patch.yml b/node_modules/@deepseek-ai/dsh-web-app/presets/cordis.patch.yml
+index 2f22d8c..e01b2b6 100644
+--- a/node_modules/@deepseek-ai/dsh-web-app/presets/cordis.patch.yml
++++ b/node_modules/@deepseek-ai/dsh-web-app/presets/cordis.patch.yml
+@@ -68,6 +68,15 @@
+             config:
+               - id: compaction-basic
+                 name: '@deepseek-ai/dsh-compaction-basic'
++                config:
++                  auto: true
++                  thresholdRatio: 0.7
++                  retainRatio: 0.12
++                  summarizationProvider: rendcore
++                  summarizationModel: gpt-5.6-sol
++                  maxTokens: 8192
++                  compactionRetries: 2
++                  maxOverflowRetries: 3
+               - id: command-compact
+                 name: '@deepseek-ai/dsh-command-compact'
+               - id: tool-result-pruner
+diff --git a/node_modules/@deepseek-ai/dsh-web-app/presets/ptc.patch.yml b/node_modules/@deepseek-ai/dsh-web-app/presets/ptc.patch.yml
+index 10b7ffc..8926654 100644
+--- a/node_modules/@deepseek-ai/dsh-web-app/presets/ptc.patch.yml
++++ b/node_modules/@deepseek-ai/dsh-web-app/presets/ptc.patch.yml
+@@ -69,6 +69,15 @@
+             config:
+               - id: compaction-basic
+                 name: '@deepseek-ai/dsh-compaction-basic'
++                config:
++                  auto: true
++                  thresholdRatio: 0.7
++                  retainRatio: 0.12
++                  summarizationProvider: rendcore
++                  summarizationModel: gpt-5.6-sol
++                  maxTokens: 8192
++                  compactionRetries: 2
++                  maxOverflowRetries: 3
+               - id: command-compact
+                 name: '@deepseek-ai/dsh-command-compact'
+               - id: tool-result-pruner
+diff --git a/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml b/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml
+index 0b898bf..445723a 100644
+--- a/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml
++++ b/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml
+@@ -69,6 +69,15 @@
+             config:
+               - id: compaction-basic
+                 name: '@deepseek-ai/dsh-compaction-basic'
++                config:
++                  auto: true
++                  thresholdRatio: 0.7
++                  retainRatio: 0.12
++                  summarizationProvider: rendcore
++                  summarizationModel: gpt-5.6-sol
++                  maxTokens: 8192
++                  compactionRetries: 2
++                  maxOverflowRetries: 3
+               - id: command-compact
+                 name: '@deepseek-ai/dsh-command-compact'
+               - id: tool-result-pruner

@@ -1,20 +1,30 @@
 {
-  "name": "dsh-desktop",
-  "version": "0.1.1",
-  "description": "A cross-platform desktop shell for DeepSeek Harness.",
+  "name": "rendcore-harness",
+  "version": "0.1.28",
+  "description": "A cross-platform desktop shell for RendCore Harness.",
   "private": true,
+  "allowScripts": {
+    "@deepseek-ai/dsh-subprocess-local": true,
+    "@google/genai": true,
+    "electron": true,
+    "electron-winstaller": true,
+    "esbuild": true,
+    "koffi": true,
+    "node-pty": true,
+    "protobufjs": true
+  },
   "type": "module",
   "main": "./out/main/index.js",
-  "author": "DataElement",
+  "author": "RendCore Harness contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dataelement/dsh-desktop.git"
+    "url": "git+https://github.com/Glaroday/rendcore-harness.git"
   },
   "bugs": {
-    "url": "https://github.com/dataelement/dsh-desktop/issues"
+    "url": "https://github.com/Glaroday/rendcore-harness/issues"
   },
-  "homepage": "https://github.com/dataelement/dsh-desktop#readme",
+  "homepage": "https://github.com/Glaroday/rendcore-harness#readme",
   "keywords": [
     "deepseek",
     "harness",
@@ -24,8 +34,8 @@
   ],
   "scripts": {
     "postinstall": "patch-package && node scripts/install-brand-assets.mjs && install-electron --no",
-    "dev": "npm run office:prepare && npm run ppt:build && electron-vite dev",
-    "build": "npm run office:prepare && npm run ppt:build && electron-vite build",
+    "dev": "npm run office:prepare && npm run ppt:build && node scripts/install-brand-assets.mjs && electron-vite dev",
+    "build": "npm run office:prepare && npm run ppt:build && node scripts/install-brand-assets.mjs && electron-vite build",
     "icons:generate": "node scripts/generate-app-icons.mjs",
     "loader:generate": "node scripts/generate-loader-gifs.mjs",
     "preview": "electron-vite preview",
@@ -276,6 +286,7 @@
     "@deepseek-ai/dsh-workflow-ptc": "0.2.0-rc.2",
     "@deepseek-ai/dsh-workspace": "0.2.0-rc.2",
     "@deepseek-ai/schemastery": "3.18.4",
+    "@liustack/modsearch": "5.9.0",
     "dsh-desktop-client-ui": "file:packages/dsh-desktop-client-ui",
     "dsh-desktop-hmr-fallback": "file:packages/dsh-desktop-hmr-fallback",
     "dsh-desktop-log-bridge": "file:packages/dsh-desktop-log-bridge",
@@ -285,6 +296,7 @@
     "dsh-desktop-preset-transfer": "file:packages/dsh-desktop-preset-transfer",
     "dsh-desktop-workbenches": "file:packages/dsh-desktop-workbenches",
     "dsh-image-generation": "file:packages/dsh-image-generation",
+    "dsh-model-fix": "file:packages/dsh-model-fix",
     "dsh-ppt": "file:packages/ppt-runtime/core",
     "dsh-ppt-composer": "file:packages/ppt-runtime/adapter",
     "electron-updater": "^6.8.9",
@@ -313,8 +325,6 @@
     "koffi": "3.1.5"
   },
   "build": {
-    "appId": "io.dsh.desktop",
-    "productName": "DSH Desktop",
     "asar": true,
     "asarUnpack": [
       "**/*.{node,dylib,dll,so,exe}",
@@ -325,6 +335,8 @@
       "node_modules/sherpa-onnx-*/**/*",
       ".build/ppt-runtime/packages/**/*"
     ],
+    "appId": "io.rendcore.harness",
+    "productName": "RendCore Harness",
     "npmRebuild": false,
     "compression": "maximum",
     "electronLanguages": [
@@ -462,12 +474,14 @@
     ],
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://dshdesktop.com/updates/latest/"
+        "provider": "github",
+        "owner": "Glaroday",
+        "repo": "rendcore-harness",
+        "releaseType": "release"
       }
     ],
     "detectUpdateChannel": false,
-    "artifactName": "dsh-desktop-${os}-${arch}.${ext}",
+    "artifactName": "rendcore-harness-${os}-${arch}.${ext}",
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.icns",
@@ -483,7 +497,7 @@
     },
     "win": {
       "icon": "build/icon.ico",
-      "verifyUpdateCodeSignature": true,
+      "verifyUpdateCodeSignature": false,
       "signtoolOptions": {
         "publisherName": "Beijing Shuju Xiangsu Intelligence Technology Co., Ltd.",
         "signingHashAlgorithms": [
@@ -501,7 +515,7 @@
       ]
     },
     "nsis": {
-      "artifactName": "dsh-desktop-windows-${arch}-setup.${ext}",
+      "artifactName": "rendcore-harness-windows-${arch}-setup.${ext}",
       "include": "build/installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,

@@ -7,7 +7,11 @@ import {
   verifyGenerationPeers
 } from 'dsh-desktop-market-installer/generations/installer'
 import { projectGenerations } from 'dsh-desktop-market-installer/generations/projection'
-import { readDesired, writeDesired } from 'dsh-desktop-market-installer/generations/registry'
+import {
+  readDesired,
+  resolveEnabledGenerations,
+  writeDesired
+} from 'dsh-desktop-market-installer/generations/registry'
 import { resolveMarketRegistry } from 'dsh-desktop-market-installer/market-registry'
 import { packageCommandEnvironment } from '../runtime/profile-plugin-command'
 
@@ -633,6 +637,28 @@ export async function migrateProfileToGenerations(deps: MigrationDeps): Promise<
       'utf8'
     )
     return noop()
+  }
+
+  // Desktop builds before the migration marker already installed plugins as
+  // generations. Reinstalling those same immutable trees is both redundant
+  // and can fail peer validation after the application itself moves. The
+  // desired registry is authoritative, so a complete name match is enough to
+  // adopt that state and add the marker this migration introduced.
+  try {
+    const enabled = await resolveEnabledGenerations(dshHome)
+    if (plugins.every((name) => enabled.has(name))) {
+      note('[desktop] migration: adopted the existing plugin generations')
+      await writeFile(
+        join(profileDir(dshHome), MARKER),
+        `${new Date().toISOString()}\n`,
+        'utf8'
+      )
+      await rm(join(profileDir(dshHome), DEFER_MARKER), { force: true }).catch(() => undefined)
+      return noop()
+    }
+  } catch {
+    // A malformed registry still follows the normal fail-closed migration
+    // path, which records the exact failure and keeps the legacy profile.
   }
 
   let plan: Awaited<ReturnType<typeof migrationPlan>>

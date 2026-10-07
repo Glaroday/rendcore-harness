@@ -200,6 +200,17 @@ describe('one-time profile migration to generations', () => {
     expect(await readDesired(home)).toEqual([])
   })
 
+  it('adopts a profile whose plugins already have enabled generations', async () => {
+    const home = await preUpgradeProfile({ 'previous-plugin': '1.0.0' })
+    await installPreviousGeneration(home)
+
+    const migrated = await migrateProfileToGenerations(deps(home))
+
+    expect(migrated).toEqual({ outcome: 'no-op' })
+    expect(isProfileMigrated(home)).toBe(true)
+    expect(installCalls).toEqual([])
+  })
+
   it('restores the pre-upgrade profile when the shared-tree rebuild fails', async () => {
     const home = await preUpgradeProfile({ 'dsh-vision-router': '2.0.1' })
     const before = await readFile(join(home, 'profiles', 'web', 'package.json'), 'utf8')

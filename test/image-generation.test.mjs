@@ -267,6 +267,9 @@ describe('image tool and durable Office assets', () => {
       ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: undefined, API_KEY: undefined, PATH: undefined,
     })
     expect(writerEnvironment({ env, platform: 'darwin', versions: { node: '24.9.0' } }).ELECTRON_RUN_AS_NODE).toBeUndefined()
+    expect(writerEnvironment({ env: { SystemRoot: 'C:\\Windows', TEMP: 'C:\\Temp', TMP: 'C:\\Temp', API_KEY: 'private-key' }, platform: 'win32', versions: { node: '24.9.0' } })).toEqual({
+      SystemRoot: 'C:\\Windows', TEMP: 'C:\\Temp', TMP: 'C:\\Temp', API_KEY: undefined,
+    })
   })
   it.each(['openai', 'bytedance'])('executes %s through ToolRuntime and writes a verifiable PNG', async provider => {
     const f = await fixture(); const s = await server()

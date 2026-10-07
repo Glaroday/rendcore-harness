@@ -1,0 +1,28 @@
+diff --git a/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/index.js b/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/index.js
+index 0ad0f84..baade1d 100644
+--- a/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/index.js
+@@ -601,7 +601,8 @@ let AgentPresetRegistry = (() => {
+ 		* @returns Current metadata, including failure when activation failed.
+ 		*/
+ 		async resolve(id) {
+-			const wanted = id ?? this.defaultId;
++			const requested = id ?? this.defaultId;
++			const wanted = requested === "code" ? "ptc" : requested;
+ 			const record = this.definitions.get(wanted);
+ 			if (record === void 0) throw new RemoteError("agent-preset/not-found", `Unknown agent preset: ${wanted}`, {
+ 				agentPreset: wanted,
+diff --git a/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/invariant.js b/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/invariant.js
+index f0ece44..c06b7b3 100644
+--- a/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/invariant.js
++++ b/node_modules/@deepseek-ai/dsh-agent-preset-registry/lib/invariant.js
+@@ -585,7 +585,8 @@ var __esDecorate = function(ctor, descriptorIn, decorators, contextIn, initializ
+ 		* @returns Current metadata, including failure when activation failed.
+ 		*/
+ 		async resolve(id) {
+-			const wanted = id ?? this.defaultId;
++			const requested = id ?? this.defaultId;
++			const wanted = requested === "code" ? "ptc" : requested;
+ 			const record = this.definitions.get(wanted);
+ 			if (record === void 0) throw new RemoteError("agent-preset/not-found", `Unknown agent preset: ${wanted}`, {
+ 				agentPreset: wanted,

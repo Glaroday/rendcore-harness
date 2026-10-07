@@ -19,6 +19,7 @@ import {
   withRegistryLock,
   writeDesired
 } from './generations/registry.mjs'
+import { migrateInstalledPluginConfig } from './plugin-config-migrations.mjs'
 import { DEFAULT_NPM_REGISTRY, resolveMarketRegistry } from './market-registry.mjs'
 import { forgetPlugin } from './plugin-state.mjs'
 import { SIDELINE_MARKER } from './pnpm-runner.mjs'
@@ -639,6 +640,7 @@ export function createDesktopPnpmService(options) {
         return { exitCode: 1, message: mutation.packageResult.output || 'generation install failed' }
       }
       mutation.commit?.()
+      await migrateInstalledPluginConfig(home, mutation.bundle, write)
       setCancel(() => {})
       write(`published in profile: ${mutation.bundle}@${spec.slice(spec.lastIndexOf('@') + 1)}; activation may require restart`)
       return { exitCode: 0 }
@@ -702,6 +704,7 @@ export function createDesktopPnpmService(options) {
         return { exitCode: 1, message: mutation.packageResult.output || 'generation install failed' }
       }
       mutation.commit?.()
+      await migrateInstalledPluginConfig(home, mutation.bundle, write)
       setCancel(() => {})
       write(`published in profile: ${mutation.bundle}@${expectedVersion}; activation may require restart`)
       return { exitCode: 0 }

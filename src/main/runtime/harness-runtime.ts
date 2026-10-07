@@ -4,11 +4,14 @@ import { createWriteStream, existsSync, mkdirSync, type WriteStream } from 'node
 import { mkdir, readFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { dirname, join, posix, win32 } from 'node:path'
+import { migrateDshPetDisplayConfig } from 'dsh-desktop-market-installer/plugin-config-migrations'
 import { StringDecoder } from 'node:string_decoder'
 import type { RuntimePhase, RuntimeSnapshot } from '../../shared/contracts'
+import { migrateLegacyPresetSetting } from '../state/preset-migration'
 import { SAFE_MODE_PROFILE } from '../state/safe-mode-profile'
 import { prepareHostDisabledPluginsPatch } from '../state/host-disabled-plugins'
 import { prepareHostPluginSourcesPatch } from '../state/host-plugin-sources'
+import { prepareRendCoreModelCatalog } from './rendcore-model-catalog'
 import { parsePluginStartupFailures, type PluginStartupFailure } from '../../shared/plugin-startup-failure'
 import { removeStaleWriterLocks } from './stale-writer-locks'
 
@@ -476,7 +479,7 @@ export class HarnessRuntime {
       ? this.options.dshSafePatchPath
       : this.options.dshPatchPath
     if (!existsSync(sourcePatchPath)) {
-      this.setState('failed', `DSH Desktop patch was not found: ${sourcePatchPath}`)
+      this.setState('failed', `RendCore Harness patch was not found: ${sourcePatchPath}`)
       return
     }
     await mkdir(this.options.dshHome, { recursive: true })
@@ -502,6 +505,19 @@ export class HarnessRuntime {
       this.writeLog(`[desktop] removed stale writer lock ${lock}`)
     }
 
+    await migrateLegacyPresetSetting(this.options.dshHome, (line) => this.writeLog(line))
+    await migrateDshPetDisplayConfig(this.options.dshHome, (line) => this.writeLog(`[desktop] ${line}`))
+    const effectivePatchPaths = profile === SAFE_MODE_PROFILE
+      ? patchPaths
+      : [
+          (await prepareRendCoreModelCatalog(
+            patchPaths[0]!,
+            this.options.dshHome,
+            (line) => this.writeLog(line)
+          )).path,
+          ...patchPaths.slice(1)
+        ]
+
     const preferredPort = this.options.preferredPort ?? DEFAULT_HARNESS_PORT
     const { port, usedPreferredPort } = await reserveLoopbackPort(preferredPort)
     const url = `http://127.0.0.1:${port}`
@@ -509,7 +525,7 @@ export class HarnessRuntime {
       this.options.nodeEntryPath,
       this.options.dshEntryPath,
       port,
-      patchPaths,
+      effectivePatchPaths,
       profile
     )
     const startupTimeoutMs =
@@ -519,14 +535,14 @@ export class HarnessRuntime {
     this.writeLog(`[desktop] starting ${new Date().toISOString()}`)
     this.writeLog(`[desktop] launch directory ${launchDirectory}`)
     this.writeLog(`[desktop] profile ${profile}`)
-    for (const path of patchPaths) this.writeLog(`[desktop] patch ${path}`)
+    for (const path of effectivePatchPaths) this.writeLog(`[desktop] patch ${path}`)
     if (!usedPreferredPort) {
       this.writeLog(
         `[desktop] preferred endpoint http://127.0.0.1:${preferredPort} is unavailable; using a temporary port`
       )
     }
     this.writeLog(`[desktop] endpoint ${url}`)
-    this.setState('starting', 'Starting DeepSeek Harness…')
+    this.setState('starting', 'Starting RendCore Harness...')
 
     const shellEnvironment = await prewarmShellEnvironment()
     let child: HarnessChildProcess

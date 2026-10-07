@@ -13,7 +13,14 @@ export function writerEnvironment(runtime = process) {
   // Tombstones clear ordinary parent entries too: no launch credentials or
   // NODE_OPTIONS enter the asset writer, even if the host inherited them.
   const env = Object.fromEntries(Object.keys(runtime.env).map(key => [key, undefined]))
-  if (runtime.platform === 'win32') env.SystemRoot = runtime.env.SystemRoot
+  if (runtime.platform === 'win32') {
+    env.SystemRoot = runtime.env.SystemRoot
+    // The Windows ACL sandbox resolves its lock root from GetTempPathW, which
+    // falls back to the Windows directory (and fails) when TMP, TEMP and
+    // USERPROFILE are all absent. Neither is a credential.
+    env.TEMP = runtime.env.TEMP
+    env.TMP = runtime.env.TMP
+  }
   // Desktop's macOS Host is an Electron utility process. Its executable runs
   // this child script only in Node mode; this constant is launch configuration.
   if (runtime.versions.electron) env.ELECTRON_RUN_AS_NODE = '1'
