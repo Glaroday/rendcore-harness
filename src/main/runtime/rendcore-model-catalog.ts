@@ -14,6 +14,25 @@ export interface RendCoreModel {
   maxTokens?: number
   input: Array<'text' | 'image'>
   reasoningEfforts?: false | Record<string, string | null>
+  /**
+   * Whether `input` came from the capability service rather than from the
+   * permissive default. Internal: never written to the patch or to settings,
+   * and only entries that stated modalities are remembered in the cache.
+   */
+  inputStated?: boolean
+}
+
+/** The only modalities the pi-ai adapter accepts (MODALITIES in dsh-llm-pi-ai). */
+const DEFAULT_INPUT: Array<'text' | 'image'> = ['text', 'image']
+
+/** Where the capabilities last stated by the service are remembered. */
+const CAPABILITY_CACHE_FILE = 'rendcore-model-capabilities.json'
+
+interface RememberedCapability {
+  contextWindow?: number
+  maxTokens?: number
+  input?: Array<'text' | 'image'>
+  reasoningEfforts?: false | Record<string, string | null>
 }
 
 interface CatalogResult {
@@ -29,6 +48,7 @@ export async function prepareRendCoreModelCatalog(
 ): Promise<CatalogResult> {
   const cachedPath = join(dshHome, 'rendcore-online.patch.yml')
   await sanitizeStoredModels(dshHome, log)
+  const remembered = await readCapabilityCache(dshHome, log)
   const capabilities = await fetchJson(RENDCORE_MODEL_CAPABILITIES_ENDPOINT, undefined, 8_000)
     .then(parseCapabilities)
     .catch((error: unknown) => {
@@ -59,10 +79,12 @@ export async function prepareRendCoreModelCatalog(
   }
 
   if (models.length > 0) {
+    models = mergeRememberedCapabilities(models, remembered, false)
     const base = await readFile(basePatchPath, 'utf8')
     const rendered = replaceCatalog(base, models)
     await writeFile(cachedPath, rendered, 'utf8')
     await syncStoredModels(dshHome, models)
+    await writeCapabilityCache(dshHome, models, remembered, log)
     await repairDefaultModel(dshHome, new Set(models.map((model) => model.id)))
     log(`[desktop] loaded ${models.length} RendCore models from ${source}`)
     return { path: cachedPath, models, source }
@@ -71,7 +93,7 @@ export async function prepareRendCoreModelCatalog(
   if (existsSync(cachedPath)) {
     try {
       const cached = await readFile(cachedPath, 'utf8')
-      const cachedModels = modelsFromPatch(parse(cached))
+      const cachedModels = mergeRememberedCapabilities(modelsFromPatch(parse(cached)), remembered, true)
       if (cachedModels.length > 0) {
         const base = await readFile(basePatchPath, 'utf8')
         await writeFile(cachedPath, replaceCatalog(base, cachedModels), 'utf8')
@@ -103,13 +125,14 @@ export function parseCapabilities(payload: unknown): RendCoreModel[] {
     const modalities = arrayOfStrings(
       value.input ?? value.modalities ?? value.input_modalities ?? value.supported_modalities
     )
-    const input = normalizeInput(modalities, value, id)
+    const input = resolveInput(modalities, value)
     return [{
       id,
       name: stringValue(value.display_name ?? value.displayName ?? value.name) || id,
       contextWindow: positiveInteger(value.context ?? value.context_window ?? value.contextWindow),
       maxTokens: positiveInteger(value.max_output ?? value.max_tokens ?? value.maxTokens),
-      input,
+      input: input.value,
+      inputStated: input.stated,
       reasoningEfforts: parseReasoning(value.thinking ?? value.reasoning_efforts ?? value.reasoningEfforts)
     }]
   }))
@@ -151,7 +174,6 @@ function mergeCatalogIds(ids: string[], capabilities: RendCoreModel[]): RendCore
 
 function fallbackModel(id: string): RendCoreModel {
   const normalized = id.toLowerCase()
-  const vision = /(gpt-5|gemini|claude|vision|qwen3\.8|ox-alpha|muse-spark)/.test(normalized)
   const contextWindow = /gpt-oss/.test(normalized) ? 131_072
     : /gpt-5\.4-mini|gpt-5\.3-codex/.test(normalized) ? 400_000
       : /gemini/.test(normalized) ? 1_048_576
@@ -162,7 +184,7 @@ function fallbackModel(id: string): RendCoreModel {
     : /^gpt-5\.(4|5)$/.test(normalized)
       ? { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' }
       : undefined
-  return { id, name: id, contextWindow, maxTokens, input: vision ? ['text', 'image'] : ['text'], reasoningEfforts }
+  return { id, name: id, contextWindow, maxTokens, input: [...DEFAULT_INPUT], reasoningEfforts }
 }
 
 function replaceCatalog(source: string, models: RendCoreModel[]): string {
@@ -198,7 +220,7 @@ async function syncStoredModels(dshHome: string, models: RendCoreModel[]): Promi
   const providers = objectValue(llm?.providers)
   const rendcore = objectValue(providers?.rendcore)
   if (!rendcore || !Array.isArray(rendcore.models)) return
-  rendcore.models = models.map((model) => ({ ...model }))
+  rendcore.models = models.map((model) => publicModel(model))
   await writeFile(settingsPath, stringify(settings), 'utf8')
 }
 
@@ -231,7 +253,7 @@ function normalizeStoredModelList(value: unknown): RendCoreModel[] {
       name: stringValue(model.name) || id,
       contextWindow: positiveInteger(model.contextWindow ?? model.context_window ?? model.context),
       maxTokens: positiveInteger(model.maxTokens ?? model.max_tokens ?? model.max_output),
-      input: normalizeInput(arrayOfStrings(model.input), model, id),
+      input: resolveInput(arrayOfStrings(model.input), model).value,
       reasoningEfforts: parseReasoning(model.reasoningEfforts ?? model.reasoning_efforts ?? model.thinking)
     }]
   }))
@@ -309,14 +331,140 @@ function parseReasoning(value: unknown): false | Record<string, string | null> |
   return levels.some((level) => level !== 'off') ? efforts : false
 }
 
-function normalizeInput(values: string[], model: Record<string, unknown>, id: string): RendCoreModel['input'] {
-  // Harness 0.1.2's pi-ai adapter currently validates only text and image.
-  // Do not let a future capability response containing video make the entire
-  // provider fail to boot; video can be exposed when the adapter supports it.
-  const normalized = values.map((value) => value.toLowerCase()).filter((value): value is 'text' | 'image' => ['text', 'image'].includes(value))
-  if (normalized.length > 0) return normalized.includes('text') ? [...new Set(normalized)] : ['text', ...new Set(normalized)]
-  if (model.supports_vision === true || model.supportsVision === true) return ['text', 'image']
-  return fallbackModel(id).input
+/** The public fields of one model, in the shape both writers expect. */
+function publicModel(model: RendCoreModel): RendCoreModel {
+  return {
+    id: model.id,
+    name: model.name,
+    ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+    ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
+    input: [...model.input],
+    ...(model.reasoningEfforts === undefined ? {} : { reasoningEfforts: model.reasoningEfforts })
+  }
+}
+
+/**
+ * The modalities a list states, or undefined when it states none.
+ *
+ * Only text and image survive: the adapter's MODALITIES is exactly those two, so
+ * a `file`, `video` or `audio` from the capability service would fail the
+ * provider config at boot instead of widening what a request may carry.
+ */
+function statedInput(values: string[]): Array<'text' | 'image'> | undefined {
+  const normalized = values
+    .map((value) => value.toLowerCase())
+    .filter((value): value is 'text' | 'image' => value === 'text' || value === 'image')
+  if (normalized.length === 0) return undefined
+  // Only two modalities exist, so any statement of them is the same claim in a
+  // canonical order; the service's own field order would otherwise churn the
+  // generated patch.
+  return ['text', 'image']
+}
+
+/**
+ * What one model accepts, and whether that was stated rather than assumed.
+ *
+ * Nothing interrogates a gateway for what it accepts (see the adapter's own
+ * `input` documentation): declaring images is what makes a vision model usable,
+ * while declaring text alone silently disables the attach button for a model
+ * that does accept them. The capability service answers for most models, but it
+ * is a synced index with gaps — a model the gateway serves while the index has
+ * no modalities for it was declared text-only, which is the bug this default
+ * fixes. An unknown model is therefore declared multimodal; a model that
+ * genuinely refuses images is refused by the provider mid-turn, which is the
+ * documented trade of a claim about the endpoint over a guess in the other
+ * direction.
+ */
+function resolveInput(
+  values: string[],
+  model: Record<string, unknown>
+): { value: Array<'text' | 'image'>; stated: boolean } {
+  const stated = statedInput(values)
+  if (stated !== undefined) return { value: stated, stated: true }
+  if (model.supports_vision === true || model.supportsVision === true) return { value: [...DEFAULT_INPUT], stated: true }
+  return { value: [...DEFAULT_INPUT], stated: false }
+}
+
+/**
+ * Fill in what the capability service did not state from the last answer it did.
+ *
+ * The service is a synced index: a model can be served by the gateway while the
+ * index temporarily has no modalities for it, and re-deriving from a guess every
+ * launch is what made a model's capabilities flicker. A remembered answer is
+ * used when the service is silent (or, for the sanitized patch fallback, always,
+ * since that file is a previous run's output rather than a fresh answer).
+ */
+function mergeRememberedCapabilities(
+  models: RendCoreModel[],
+  remembered: Map<string, RememberedCapability>,
+  preferRemembered: boolean
+): RendCoreModel[] {
+  if (remembered.size === 0) return models
+  return models.map((model) => {
+    const known = remembered.get(model.id.toLowerCase())
+    if (known === undefined) return model
+    const useInput = known.input !== undefined && (preferRemembered || model.inputStated !== true)
+    return {
+      ...model,
+      contextWindow: model.contextWindow ?? known.contextWindow,
+      maxTokens: model.maxTokens ?? known.maxTokens,
+      input: useInput ? [...known.input!] : model.input,
+      inputStated: model.inputStated === true || useInput,
+      reasoningEfforts: model.reasoningEfforts ?? known.reasoningEfforts
+    }
+  })
+}
+
+async function readCapabilityCache(
+  dshHome: string,
+  log: (line: string) => void
+): Promise<Map<string, RememberedCapability>> {
+  const remembered = new Map<string, RememberedCapability>()
+  const path = join(dshHome, CAPABILITY_CACHE_FILE)
+  if (!existsSync(path)) return remembered
+  try {
+    const payload = JSON.parse(await readFile(path, 'utf8')) as { models?: unknown }
+    const entries = objectValue(payload.models)
+    if (entries === undefined) return remembered
+    for (const [id, raw] of Object.entries(entries)) {
+      const entry = objectValue(raw)
+      if (entry === undefined) continue
+      const input = statedInput(arrayOfStrings(entry.input))
+      remembered.set(id.toLowerCase(), {
+        contextWindow: positiveInteger(entry.contextWindow),
+        maxTokens: positiveInteger(entry.maxTokens),
+        ...(input === undefined ? {} : { input }),
+        reasoningEfforts: parseReasoning(entry.reasoningEfforts)
+      })
+    }
+  } catch (error) {
+    log(`[desktop] remembered RendCore capabilities are unreadable: ${message(error)}`)
+  }
+  return remembered
+}
+
+async function writeCapabilityCache(
+  dshHome: string,
+  models: RendCoreModel[],
+  remembered: Map<string, RememberedCapability>,
+  log: (line: string) => void
+): Promise<void> {
+  try {
+    const entries: Record<string, RememberedCapability> = {}
+    for (const [id, entry] of remembered) entries[id] = entry
+    for (const model of models) {
+      if (model.inputStated !== true) continue
+      entries[model.id.toLowerCase()] = {
+        contextWindow: model.contextWindow,
+        maxTokens: model.maxTokens,
+        input: [...model.input],
+        reasoningEfforts: model.reasoningEfforts
+      }
+    }
+    await writeFile(join(dshHome, CAPABILITY_CACHE_FILE), `${JSON.stringify({ version: 1, models: entries }, undefined, 2)}\n`, 'utf8')
+  } catch (error) {
+    log(`[desktop] could not remember RendCore capabilities: ${message(error)}`)
+  }
 }
 
 function isImageGenerationOnly(id: string, value?: Record<string, unknown>): boolean {
