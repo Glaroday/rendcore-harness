@@ -2,13 +2,37 @@ import type { AvailableRelease } from '../../shared/contracts'
 
 export type { AvailableRelease }
 
-export const STABLE_FEED_URL = 'https://dshdesktop.com/updates/latest/'
-export const VERSION_INDEX_URL = 'https://dshdesktop.com/updates/versions.json'
+/**
+ * The repository that publishes RendCore Harness releases.
+ *
+ * The update sources are this repository's releases and nothing else: the
+ * upstream DSH Desktop feed (dshdesktop.com) numbers its versions 0.7, 0.8,
+ * 0.10 and so on, which outranks every RendCore version numerically, so asking
+ * it for updates offered upstream builds as updates to this product.
+ */
+const RELEASE_REPO = 'Glaroday/rendcore-harness'
+const RELEASE_INDEX_URL = `https://api.github.com/repos/${RELEASE_REPO}/releases?per_page=50`
 
 const INDEX_TIMEOUT_MS = 8_000
 
+/** Release asset directory of one tag, as GitHub serves it. */
 export function archiveFeedUrl(version: string): string {
-  return `https://dshdesktop.com/updates/archive/${version}/`
+  return `https://github.com/${RELEASE_REPO}/releases/download/v${version.trim().replace(/^v/, '')}/`
+}
+
+/**
+ * The feed directory holding one version's `latest.yml`, preferring the user's
+ * mirrors. A mirror is a prefix glued to the GitHub path, so the version is
+ * rewritten inside the URL rather than rebuilt from its host; a mirror that
+ * does not carry the release path is skipped rather than guessed at.
+ */
+export function versionFeedUrl(version: string, mirrors: readonly string[] = []): string {
+  const tag = `v${version.trim().replace(/^v/, '')}`
+  for (const mirror of mirrors) {
+    const rewritten = mirror.replace(/\/releases\/latest\/download\/?$/, `/releases/download/${tag}/`)
+    if (rewritten !== mirror && /^https?:\/\//.test(rewritten)) return rewritten
+  }
+  return archiveFeedUrl(version)
 }
 
 /** Split "1.2.3-rc.1" into ([1,2,3], "rc.1"). Non-numeric segments read as 0. */
@@ -86,11 +110,21 @@ function isRelease(value: unknown): value is AvailableRelease {
   )
 }
 
-export function parseVersionIndex(raw: unknown): AvailableRelease[] {
-  if (typeof raw !== 'object' || raw === null) return []
-  const versions = (raw as { versions?: unknown }).versions
-  if (!Array.isArray(versions)) return []
-  return versions.filter(isRelease)
+/**
+ * The releases one GitHub release index lists, in the shape the picker needs.
+ * Drafts are not offered, and a tag that is not `v<semver>` is ignored.
+ */
+export function parseReleaseIndex(raw: unknown): AvailableRelease[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((entry) => {
+    if (typeof entry !== 'object' || entry === null) return []
+    const record = entry as { tag_name?: unknown; draft?: unknown }
+    if (record.draft === true || typeof record.tag_name !== 'string') return []
+    const tag = record.tag_name.trim()
+    const version = tag.replace(/^v/, '')
+    if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) return []
+    return [{ version, tag, archiveUrl: archiveFeedUrl(version) }]
+  })
 }
 
 export async function fetchAvailableReleases(
@@ -100,11 +134,14 @@ export async function fetchAvailableReleases(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), INDEX_TIMEOUT_MS)
   try {
-    const response = await fetchImpl(VERSION_INDEX_URL, { signal: controller.signal })
+    const response = await fetchImpl(RELEASE_INDEX_URL, {
+      headers: { accept: 'application/vnd.github+json' },
+      signal: controller.signal
+    })
     if (!response.ok) {
       throw new Error(`Version index request failed: ${response.status}`)
     }
-    const releases = parseVersionIndex(await response.json())
+    const releases = parseReleaseIndex(await response.json())
     return releases
       .filter((release) => compareVersions(release.version, currentVersion) !== 0)
       .sort((a, b) => compareVersions(b.version, a.version))

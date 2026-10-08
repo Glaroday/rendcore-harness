@@ -1,4 +1,3 @@
-import { checkDesktopUpdate } from '../desktop-service'
 import { isPrereleaseVersion, isVersion } from '../desktop-service/service'
 import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
 import electronUpdater from 'electron-updater'
@@ -31,9 +30,9 @@ import {
   writeSkippedVersion
 } from './skipped-version'
 import {
-  archiveFeedUrl,
   compareVersions,
-  fetchAvailableReleases
+  fetchAvailableReleases,
+  versionFeedUrl
 } from './version-catalog'
 
 const { autoUpdater } = electronUpdater
@@ -159,20 +158,17 @@ export async function checkForUpdates(manual = false): Promise<UpdateStatus> {
   lastCheckedAt = Date.now()
   selectedUpdateVersion = undefined
   checkPromise = (async () => {
-    const policy = await checkDesktopUpdate()
-    if (!policy.updateAvailable) {
-      transition({ type: 'not-available' })
-      scheduleReset()
-      return
-    }
-    selectedUpdateVersion = policy.version
-    autoUpdater.setFeedURL({ provider: 'generic', url: policy.feedUrl })
-    autoUpdater.allowPrerelease = isPrereleaseVersion(policy.version)
+    // The configured mirrors (settings -> 更新镜像代理), then this repository's
+    // own releases. The upstream DSH Desktop update service used to answer
+    // here, and since its versions outrank every RendCore version it offered
+    // upstream builds as updates to this product.
+    configureFirstFeed()
+    autoUpdater.allowPrerelease = false
     autoUpdater.allowDowngrade = false
-    const result = await autoUpdater.checkForUpdates()
-    if (result?.updateInfo.version !== policy.version) {
-      throw new Error('Update archive does not match the selected version')
-    }
+    const result = await checkUsingConfiguredFeeds()
+    const version = (result as { updateInfo?: { version?: unknown } } | undefined)?.updateInfo
+      ?.version
+    selectedUpdateVersion = typeof version === 'string' ? version : undefined
   })()
 
   try {
@@ -222,7 +218,7 @@ export async function installSpecificVersion(version: unknown): Promise<UpdateSt
 
   selectedUpdateVersion = version
   pendingDowngrade = compareVersions(version, app.getVersion()) < 0
-  autoUpdater.setFeedURL({ provider: 'generic', url: archiveFeedUrl(version) })
+  autoUpdater.setFeedURL({ provider: 'generic', url: versionFeedUrl(version, updateFeedConfig.feedUrls) })
   autoUpdater.allowDowngrade = true
   autoUpdater.allowPrerelease = isPrereleaseVersion(version)
   manualCheck = true

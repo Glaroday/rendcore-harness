@@ -355,10 +355,9 @@ function statedInput(values: string[]): Array<'text' | 'image'> | undefined {
     .map((value) => value.toLowerCase())
     .filter((value): value is 'text' | 'image' => value === 'text' || value === 'image')
   if (normalized.length === 0) return undefined
-  // Only two modalities exist, so any statement of them is the same claim in a
-  // canonical order; the service's own field order would otherwise churn the
-  // generated patch.
-  return ['text', 'image']
+  // Canonical order, so the generated patch does not churn with the service's
+  // own field order. An explicit text-only answer stays text-only.
+  return normalized.includes('image') ? ['text', 'image'] : ['text']
 }
 
 /**

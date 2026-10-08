@@ -3,19 +3,33 @@ import {
   archiveFeedUrl,
   compareVersions,
   fetchAvailableReleases,
-  parseVersionIndex,
-  STABLE_FEED_URL,
-  VERSION_INDEX_URL
+  parseReleaseIndex,
+  versionFeedUrl
 } from '../src/main/update/version-catalog'
 
-describe('version-catalog constants', () => {
-  it('points the stable feed and index at the dshdesktop domain', () => {
-    expect(STABLE_FEED_URL).toBe('https://dshdesktop.com/updates/latest/')
-    expect(VERSION_INDEX_URL).toBe('https://dshdesktop.com/updates/versions.json')
+describe('version-catalog sources', () => {
+  it('builds a per-version feed url in this repository, with a trailing slash', () => {
+    expect(archiveFeedUrl('1.2.3')).toBe(
+      'https://github.com/Glaroday/rendcore-harness/releases/download/v1.2.3/'
+    )
+    expect(archiveFeedUrl('v1.2.3')).toBe(
+      'https://github.com/Glaroday/rendcore-harness/releases/download/v1.2.3/'
+    )
   })
 
-  it('builds a per-version archive feed url with a trailing slash', () => {
-    expect(archiveFeedUrl('1.2.3')).toBe('https://dshdesktop.com/updates/archive/1.2.3/')
+  it('rewrites a configured mirror to the requested version', () => {
+    const mirrors = [
+      'https://gh-proxy.com/https://github.com/Glaroday/rendcore-harness/releases/latest/download/',
+      'https://ghfast.top/https://github.com/Glaroday/rendcore-harness/releases/latest/download/'
+    ]
+    expect(versionFeedUrl('1.2.3', mirrors)).toBe(
+      'https://gh-proxy.com/https://github.com/Glaroday/rendcore-harness/releases/download/v1.2.3/'
+    )
+  })
+
+  it('falls back to this repository when no mirror carries the release path', () => {
+    expect(versionFeedUrl('1.2.3', ['https://example.com/whatever/'])).toBe(archiveFeedUrl('1.2.3'))
+    expect(versionFeedUrl('1.2.3')).toBe(archiveFeedUrl('1.2.3'))
   })
 })
 
@@ -50,36 +64,30 @@ describe('compareVersions', () => {
   })
 })
 
-describe('parseVersionIndex', () => {
-  it('keeps well-formed entries and drops the rest', () => {
-    const raw = {
-      versions: [
-        { version: '1.2.3', tag: 'v1.2.3', archiveUrl: 'https://dshdesktop.com/updates/archive/1.2.3/' },
-        { version: '', tag: 'v0', archiveUrl: 'x' },
-        { nope: true },
-        42
-      ]
-    }
-    expect(parseVersionIndex(raw)).toEqual([
-      { version: '1.2.3', tag: 'v1.2.3', archiveUrl: 'https://dshdesktop.com/updates/archive/1.2.3/' }
+describe('parseReleaseIndex', () => {
+  it('keeps published v-tags and drops drafts, junk and non-semver tags', () => {
+    const raw = [
+      { tag_name: 'v1.2.3' },
+      { tag_name: 'v1.1.0', draft: true },
+      { tag_name: 'nightly' },
+      { tag_name: 'v0.0' },
+      'nope',
+      42
+    ]
+    expect(parseReleaseIndex(raw)).toEqual([
+      { version: '1.2.3', tag: 'v1.2.3', archiveUrl: archiveFeedUrl('1.2.3') }
     ])
   })
 
-  it('returns an empty array for non-objects or a missing versions array', () => {
-    expect(parseVersionIndex(null)).toEqual([])
-    expect(parseVersionIndex({})).toEqual([])
-    expect(parseVersionIndex('nope')).toEqual([])
+  it('returns an empty array for anything that is not a release list', () => {
+    expect(parseReleaseIndex(null)).toEqual([])
+    expect(parseReleaseIndex({})).toEqual([])
+    expect(parseReleaseIndex('nope')).toEqual([])
   })
 })
 
 describe('fetchAvailableReleases', () => {
-  const index = {
-    versions: [
-      { version: '1.0.0', tag: 'v1.0.0', archiveUrl: 'a' },
-      { version: '1.2.0', tag: 'v1.2.0', archiveUrl: 'b' },
-      { version: '1.1.0', tag: 'v1.1.0', archiveUrl: 'c' }
-    ]
-  }
+  const index = [{ tag_name: 'v1.0.0' }, { tag_name: 'v1.2.0' }, { tag_name: 'v1.1.0' }]
   const ok = () =>
     Promise.resolve({ ok: true, json: () => Promise.resolve(index) } as Response)
 
