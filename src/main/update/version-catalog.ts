@@ -143,7 +143,7 @@ export async function fetchAvailableReleases(
     }
     const releases = parseReleaseIndex(await response.json())
     return releases
-      .filter((release) => compareVersions(release.version, currentVersion) !== 0)
+      .filter((release) => compareVersions(release.version, currentVersion) < 0)
       .sort((a, b) => compareVersions(b.version, a.version))
   } finally {
     clearTimeout(timer)

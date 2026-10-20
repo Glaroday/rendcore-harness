@@ -21,6 +21,7 @@ import {
 import {
   initialUpdateStatus,
   reduceUpdateStatus,
+  normalizeReleaseNotes,
   type UpdateStateEvent
 } from './update-state'
 import {
@@ -36,32 +37,34 @@ import {
 } from './version-catalog'
 
 const { autoUpdater } = electronUpdater
-const TRANSIENT_STATUS_MS = 8_000
 
 let status = initialUpdateStatus(app.getVersion())
 let prepareToInstall: (() => Promise<void>) | undefined
 let startupTimer: NodeJS.Timeout | undefined
 let intervalTimer: NodeJS.Timeout | undefined
-let resetTimer: NodeJS.Timeout | undefined
 let checkPromise: Promise<unknown> | undefined
 let lastCheckedAt = 0
 let installing = false
 let downloading = false
 let started = false
 let handlersRegistered = false
+let updateLocale: (() => 'en' | 'zh') | undefined
 let skippedVersion: string | undefined
 let skipLoaded = false
 let manualCheck = false
+let manualCheckRequested = false
+let presentationId = 0
 let pendingDowngrade = false
 let updateFeedConfig: UpdateFeedConfig = { feedUrls: [], fallbackToGitHub: true }
 let activeMirrorIndex = -1
 let selectedUpdateVersion: string | undefined
 
 export function getUpdateStatus(): UpdateStatus {
-  return { ...status }
+  return { ...status, locale: updateLocale?.() }
 }
 
-export function registerUpdateHandlers(): void {
+export function registerUpdateHandlers(options: { locale?: () => 'en' | 'zh' } = {}): void {
+  updateLocale = options.locale ?? updateLocale
   if (handlersRegistered) return
   handlersRegistered = true
   updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
@@ -129,14 +132,15 @@ export function startUpdateManager(options: { prepareToInstall: () => Promise<vo
 
   configureUpdater()
   startupTimer = setTimeout(
-    () => void checkForUpdates(),
+    () => void checkForUpdates(false, 'startup'),
     UPDATE_STARTUP_DELAY_MS + Math.random() * UPDATE_STARTUP_JITTER_MS
   )
   intervalTimer = setInterval(() => void checkForUpdates(), UPDATE_CHECK_INTERVAL_MS)
   powerMonitor.on('resume', checkAfterResume)
 }
 
-export async function checkForUpdates(manual = false): Promise<UpdateStatus> {
+export async function checkForUpdates(manual = false, source: UpdateStatus['source'] = manual ? 'manual' : 'runtime'): Promise<UpdateStatus> {
+  if (manual) status.presentationId = ++presentationId
   if (!supportsUpdates()) {
     transition(
       {
@@ -145,40 +149,63 @@ export async function checkForUpdates(manual = false): Promise<UpdateStatus> {
       },
       manual
     )
-    if (manual) scheduleReset()
     return getUpdateStatus()
   }
 
-  if (checkPromise || ['available', 'downloading', 'downloaded'].includes(status.phase)) {
+  if (checkPromise) {
+    if (manual) {
+      manualCheckRequested = true
+      transition({ type: 'present-manual' })
+    }
+    await checkPromise
+    return getUpdateStatus()
+  }
+  if (['downloading', 'downloaded'].includes(status.phase) || (!manual && status.phase === 'available')) {
+    if (manual) {
+      manualCheck = true
+      transition({ type: 'present-manual' })
+    }
     return getUpdateStatus()
   }
 
-  transition({ type: 'check', manual })
+  transition({ type: 'check', manual, source })
   manualCheck = manual
+  manualCheckRequested = manual
   lastCheckedAt = Date.now()
   selectedUpdateVersion = undefined
   checkPromise = (async () => {
-    // The configured mirrors (settings -> 更新镜像代理), then this repository's
-    // own releases. The upstream DSH Desktop update service used to answer
-    // here, and since its versions outrank every RendCore version it offered
-    // upstream builds as updates to this product.
-    configureFirstFeed()
-    autoUpdater.allowPrerelease = false
-    autoUpdater.allowDowngrade = false
-    const result = await checkUsingConfiguredFeeds()
-    const version = (result as { updateInfo?: { version?: unknown } } | undefined)?.updateInfo
-      ?.version
-    selectedUpdateVersion = typeof version === 'string' ? version : undefined
-  })()
-
-  try {
-    await checkPromise
-  } catch (error) {
-    transition({ type: 'error', message: errorMessage(error) })
-    if (manual) scheduleReset()
-  } finally {
-    checkPromise = undefined
-  }
+    try {
+      let requestManual = manual
+      while (true) {
+        manualCheck = requestManual
+        // The configured mirrors (settings -> 更新镜像代理), then this
+        // repository's own releases. The upstream DSH Desktop update service
+        // used to answer here, and since its versions outrank every RendCore
+        // version it offered upstream builds as updates to this product.
+        configureFirstFeed()
+        autoUpdater.allowPrerelease = false
+        autoUpdater.allowDowngrade = false
+        const result = await checkUsingConfiguredFeeds()
+        const version = (result as { updateInfo?: { version?: unknown } } | undefined)?.updateInfo
+          ?.version
+        selectedUpdateVersion = typeof version === 'string' ? version : undefined
+        // A manual request during the automatic check must get its own
+        // decision; offering the automatic answer would honour a skip the user
+        // has just taken back.
+        if (!requestManual && manualCheckRequested) {
+          requestManual = true
+          status.presentationId = presentationId
+          transition({ type: 'check', manual: true })
+          continue
+        }
+        return
+      }
+    } catch (error) {
+      transition({ type: 'error', message: errorMessage(error) })
+    } finally {
+      checkPromise = undefined
+    }  })()
+  await checkPromise
 
   return getUpdateStatus()
 }
@@ -189,13 +216,19 @@ export async function checkForUpdates(manual = false): Promise<UpdateStatus> {
  */
 export async function downloadAvailableUpdate(): Promise<UpdateStatus> {
   if (status.phase !== 'available' || downloading) return getUpdateStatus()
+  const expectedVersion = status.availableVersion
+  // A queued manual check can replace an automatic offer. Consent to A must
+  // not download B; history installs already own this lock and cannot await it.
+  if (checkPromise && !pendingDowngrade) await checkPromise
+  if (status.phase !== 'available' || status.availableVersion !== expectedVersion || downloading) {
+    return getUpdateStatus()
+  }
   downloading = true
 
   try {
     await autoUpdater.downloadUpdate()
   } catch (error) {
     transition({ type: 'error', message: errorMessage(error) })
-    if (status.manual) scheduleReset()
   } finally {
     downloading = false
   }
@@ -210,41 +243,44 @@ export async function downloadAvailableUpdate(): Promise<UpdateStatus> {
  * — there is no version pinning.
  */
 export async function installSpecificVersion(version: unknown): Promise<UpdateStatus> {
-  if (!isVersion(version)) return getUpdateStatus()
+  if (!isVersion(version) || compareVersions(version, app.getVersion()) >= 0) return getUpdateStatus()
   if (!supportsUpdates()) return getUpdateStatus()
   if (checkPromise || ['checking', 'downloading', 'downloaded'].includes(status.phase)) {
     return getUpdateStatus()
   }
 
-  selectedUpdateVersion = version
-  pendingDowngrade = compareVersions(version, app.getVersion()) < 0
-  autoUpdater.setFeedURL({ provider: 'generic', url: versionFeedUrl(version, updateFeedConfig.feedUrls) })
-  autoUpdater.allowDowngrade = true
-  autoUpdater.allowPrerelease = isPrereleaseVersion(version)
   manualCheck = true
+  status.presentationId = ++presentationId
   transition({ type: 'check', manual: true })
   lastCheckedAt = Date.now()
-  checkPromise = autoUpdater.checkForUpdates()
-
-  try {
-    await checkPromise
-    if (status.phase === 'available' && status.availableVersion === version) {
-      await downloadAvailableUpdate()
-    } else if (status.phase !== 'downloading' && status.phase !== 'downloaded') {
-      transition({ type: 'error', message: '在更新源未找到该版本' })
-      scheduleReset()
+  checkPromise = (async () => {
+    try {
+      const releases = await fetchAvailableReleases(app.getVersion())
+      if (!releases.some(release => release.version === version)) {
+        throw new Error('Selected version is not in the release history')
+      }
+      selectedUpdateVersion = version
+      pendingDowngrade = true
+      autoUpdater.setFeedURL({ provider: 'generic', url: versionFeedUrl(version, updateFeedConfig.feedUrls) })
+      autoUpdater.allowDowngrade = true
+      autoUpdater.allowPrerelease = isPrereleaseVersion(version)
+      await autoUpdater.checkForUpdates()
+      if (status.phase === 'available' && status.availableVersion === version) {
+        await downloadAvailableUpdate()
+      } else if (status.phase !== 'downloading' && status.phase !== 'downloaded') {
+        transition({ type: 'error', message: '在更新源未找到该版本' })
+      }
+    } catch (error) {
+      transition({ type: 'error', message: errorMessage(error) })
+    } finally {
+      checkPromise = undefined
+      configureFirstFeed()
+      autoUpdater.allowDowngrade = false
+      pendingDowngrade = false
+      autoUpdater.allowPrerelease = false
     }
-  } catch (error) {
-    transition({ type: 'error', message: errorMessage(error) })
-    scheduleReset()
-  } finally {
-    checkPromise = undefined
-    configureFirstFeed()
-    autoUpdater.allowDowngrade = false
-    pendingDowngrade = false
-    autoUpdater.allowPrerelease = false
-  }
-
+  })()
+  await checkPromise
   return getUpdateStatus()
 }
 
@@ -258,17 +294,14 @@ export async function installDownloadedUpdate(): Promise<void> {
   } catch (error) {
     installing = false
     transition({ type: 'error', message: errorMessage(error) }, true)
-    scheduleReset()
   }
 }
 
 export function stopUpdateManager(): void {
   if (startupTimer) clearTimeout(startupTimer)
   if (intervalTimer) clearInterval(intervalTimer)
-  if (resetTimer) clearTimeout(resetTimer)
   startupTimer = undefined
   intervalTimer = undefined
-  resetTimer = undefined
   if (started && app.isReady()) powerMonitor.removeListener('resume', checkAfterResume)
 }
 
@@ -291,7 +324,7 @@ function configureUpdater(): void {
   }
 
   autoUpdater.on('checking-for-update', () =>
-    transition({ type: 'check', manual: status.manual })
+    transition({ type: 'check', manual: status.manual, source: status.source })
   )
   autoUpdater.on('update-available', (info) => {
     if (selectedUpdateVersion !== undefined && info.version !== selectedUpdateVersion) {
@@ -305,21 +338,19 @@ function configureUpdater(): void {
     }
     // Offered, not fetched: nothing leaves the network until the user accepts
     // the update, which is the same click that starts the download.
-    transition({ type: 'available', version: info.version })
+    transition({ type: 'available', version: info.version, releaseNotes: normalizeReleaseNotes(info.releaseNotes) })
   })
   autoUpdater.on('download-progress', (progress) =>
     transition({ type: 'progress', percent: progress.percent })
   )
   autoUpdater.on('update-not-available', () => {
     transition({ type: 'not-available' })
-    scheduleReset()
   })
   autoUpdater.on('update-downloaded', (info) =>
     transition({ type: 'downloaded', version: info.version })
   )
   autoUpdater.on('error', (error) => {
     transition({ type: 'error', message: errorMessage(error) })
-    if (status.manual) scheduleReset()
   })
 }
 
@@ -386,25 +417,17 @@ function configureGitHubFeed(): void {
 }
 
 function transition(event: UpdateStateEvent, manualOverride?: boolean): void {
-  if (event.type !== 'reset' && resetTimer) {
-    clearTimeout(resetTimer)
-    resetTimer = undefined
-  }
-
   status = reduceUpdateStatus(status, event)
-  if (manualOverride !== undefined) status.manual = manualOverride
+  if (manualOverride !== undefined) {
+    status.manual = manualOverride
+    if (manualOverride) status.source = 'manual'
+  }
   if (pendingDowngrade && event.type !== 'reset') status.downgrade = true
 
   console.info('[updater] status', status.phase, status.percent ?? '')
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send('updates:status-changed', getUpdateStatus())
   }
-}
-
-function scheduleReset(): void {
-  if (!status.manual) return
-  if (resetTimer) clearTimeout(resetTimer)
-  resetTimer = setTimeout(() => transition({ type: 'reset' }), TRANSIENT_STATUS_MS)
 }
 
 function checkAfterResume(): void {

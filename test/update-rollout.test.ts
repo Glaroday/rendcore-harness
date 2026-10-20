@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
+  catalog: vi.fn(),
   handlers: new Map<string, (...args: any[]) => void>(),
   updater: { setFeedURL: vi.fn(), checkForUpdates: vi.fn(), downloadUpdate: vi.fn(), quitAndInstall: vi.fn(), on: vi.fn(), autoDownload: false, allowDowngrade: false, allowPrerelease: false }
 }))
 vi.mock('../src/main/desktop-service', () => ({ checkDesktopUpdate: vi.fn() }))
+vi.mock('../src/main/update/version-catalog', async importOriginal => ({ ...await importOriginal<object>(), fetchAvailableReleases: mocks.catalog }))
 vi.mock('electron-updater', () => ({ default: { autoUpdater: mocks.updater } }))
 vi.mock('electron', () => ({ app: { isPackaged: true, getVersion: () => '0.8.0', getPath: () => '/nonexistent-desktop-test', isReady: () => true }, BrowserWindow: { getAllWindows: () => [] }, powerMonitor: { on: vi.fn(), removeListener: vi.fn() }, ipcMain: { handle: vi.fn() } }))
 vi.mock('../src/main/update/update-policy', async importOriginal => ({ ...await importOriginal<object>(), supportsAutoUpdates: () => true }))
@@ -16,6 +18,8 @@ let manager: typeof import('../src/main/update/update-manager')
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); mocks.handlers.clear()
   mocks.updater.on.mockImplementation((event, callback) => { mocks.handlers.set(event, callback) })
+  // installSpecificVersion verifies the version against the release history.
+  mocks.catalog.mockResolvedValue([{ version: '0.7.0', tag: 'v0.7.0', archiveUrl: 'https://github.com/Glaroday/rendcore-harness/releases/download/v0.7.0/' }])
   mocks.updater.downloadUpdate.mockResolvedValue([])
   manager = await import('../src/main/update/update-manager')
   manager.startUpdateManager({ prepareToInstall: async () => {} })
