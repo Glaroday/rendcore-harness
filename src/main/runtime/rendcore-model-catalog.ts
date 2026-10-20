@@ -5,7 +5,7 @@ import { parse, stringify } from 'yaml'
 
 export const RENDCORE_MODELS_ENDPOINT = 'http://43.248.102.104:18704/v1/models'
 export const RENDCORE_MODEL_CAPABILITIES_ENDPOINT = 'http://43.248.102.104:8600/api/models'
-const SAFE_DEFAULT_MODEL = 'gpt-5.6-sol'
+const SAFE_DEFAULT_MODEL = 'gpt-6.1-sol'
 
 export interface RendCoreModel {
   id: string
