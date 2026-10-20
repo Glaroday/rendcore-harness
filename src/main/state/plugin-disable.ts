@@ -147,11 +147,11 @@ function foreignDisableIds(patchText: string, owned: ReadonlySet<string>): strin
 }
 
 /**
- * The rows an installed plugin's bundle patch inserts and the foreign rows it
- * disables. Like dsh-market, both the declared `dsh.bundle.patch` and a root
- * `cordis.patch.yml` count, since the loader probes both.
+ * The patch files an installed plugin declares, plus the root `cordis.patch.yml`
+ * the loader probes when nothing is declared. Unreadable files are skipped: a
+ * package that is not installed has no rows to aim at.
  */
-async function pluginPatchRows(profileDirectory: string, pluginName: string): Promise<PluginPatchRows> {
+async function pluginPatchTexts(profileDirectory: string, pluginName: string): Promise<string[]> {
   const packageDirectory = join(profileDirectory, 'node_modules', pluginName)
   const patchFiles = new Set([resolve(packageDirectory, 'cordis.patch.yml')])
   try {
@@ -171,6 +171,16 @@ async function pluginPatchRows(profileDirectory: string, pluginName: string): Pr
       // A package without this patch file.
     }
   }
+  return texts
+}
+
+/**
+ * The rows an installed plugin's bundle patch inserts and the foreign rows it
+ * disables. Like dsh-market, both the declared `dsh.bundle.patch` and a root
+ * `cordis.patch.yml` count, since the loader probes both.
+ */
+async function pluginPatchRows(profileDirectory: string, pluginName: string): Promise<PluginPatchRows> {
+  const texts = await pluginPatchTexts(profileDirectory, pluginName)
   const inserted = [...new Set(texts.flatMap(bundleEntryIds))]
   const owned = new Set(inserted)
   const foreignDisables = [...new Set(texts.flatMap((text) => foreignDisableIds(text, owned)))]
@@ -306,6 +316,110 @@ export async function enableProfilePlugin(
  */
 export async function forgetMarketDisable(dshHome: string, pluginName: string): Promise<void> {
   await forgetPlugin(dirname(profilePackageJsonPath(dshHome)), pluginName)
+}
+
+/**
+ * Whether a bundle patch is the shape dsh-market can hot-mount.
+ *
+ * The market's own reader (dshmarket/lib/hot.js `parseSimplePatch`) accepts
+ * nothing but `insert` rows carrying an `id` and a `name`, and returns null for
+ * anything else — a `config` block, a `disabled` row, a `!!js` expression. Its
+ * toggle then refuses to mount the package live and answers "it activates on
+ * restart", which is the shape this module's reconciliation exists for. The
+ * check mirrors that reader so the two agree on which packages are affected.
+ */
+function isPlainInsertBundlePatch(text: string): boolean {
+  let pending: string | null = null
+  let rows = 0
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, '').trimEnd()
+    if (line.trim() === '') continue
+    if (/^-\s+insert:\s*$/.test(line)) continue
+    const id = /^\s+-\s+id:\s*(\S+)\s*$/.exec(line)
+    if (id !== null) {
+      if (pending !== null) return false
+      pending = id[1]!
+      continue
+    }
+    const name = /^\s+name:\s*['"]?([^'"\s]+)['"]?\s*$/.exec(line)
+    if (name !== null && pending !== null) {
+      rows += 1
+      pending = null
+      continue
+    }
+    return false
+  }
+  return pending === null && rows > 0
+}
+
+/** Bundles the profile manifest declares, or none when it cannot be read. */
+async function declaredBundles(dshHome: string): Promise<string[]> {
+  try {
+    const manifest = JSON.parse(await readFile(profilePackageJsonPath(dshHome), 'utf8')) as {
+      dsh?: { profile?: { bundles?: unknown } }
+    }
+    const bundles = manifest.dsh?.profile?.bundles
+    return Array.isArray(bundles) ? bundles.filter((name): name is string => typeof name === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export interface MarketBundleSwitchRepair {
+  name: string
+  /** The loader rows the switch was pinned onto. */
+  rows: string[]
+}
+
+/**
+ * Reconcile the market's package switch with the profile's bundle list.
+ *
+ * Harness reads `.dsh-market/state.json#disabled` before it prepares bundle
+ * manifests, so a name in that list removes the package's whole bundle layer
+ * from the composition. That is a working disable — until something puts the
+ * bundle back into `dsh.profile.bundles`, which both launch projection and
+ * bundle healing do for every installed bundle. The two layers then disagree:
+ * the switch keeps the bundle out, so none of the package's loader rows exist,
+ * and dsh-market's enable path has nothing to flip. For a package whose patch
+ * carries `config`/`!!js` rows the market also refuses to hot-mount it, so the
+ * enable fails, the failure re-records the disable (#575 keeps a failed enable
+ * from persisting), and every restart skips the bundle again. Nothing in the
+ * UI can switch it back on.
+ *
+ * The package's inserted rows are the durable disable its own enable path
+ * understands, so pin the switch into the user patch layer and drop the
+ * redundant market entry. The plugin stays exactly as the user left it — off —
+ * while the bundle composes again and the market can toggle it.
+ *
+ * A pure-insert bundle needs none of this: the market hot-mounts it, so its
+ * enable already succeeds. A disable-carrier is left alone for the same reason
+ * `disableProfilePlugin` refuses one: its patch speaks for rows it does not
+ * insert, and pinning those would switch off a neighbour.
+ *
+ * @param dshHome - Harness home holding the profile.
+ * @returns One entry per reconciled package; empty when nothing was stuck.
+ */
+export async function reconcileMarketBundleSwitches(dshHome: string): Promise<MarketBundleSwitchRepair[]> {
+  const profileDirectory = dirname(profilePackageJsonPath(dshHome))
+  const bundles = await declaredBundles(dshHome)
+  if (bundles.length === 0) return []
+  const { disabled } = await readMarketState(profileDirectory)
+  const repaired: MarketBundleSwitchRepair[] = []
+  for (const name of disabled) {
+    if (!bundles.includes(name)) continue
+    const { inserted, foreignDisables } = await pluginPatchRows(profileDirectory, name)
+    if (inserted.length === 0 || foreignDisables.length > 0) continue
+    const texts = await pluginPatchTexts(profileDirectory, name)
+    if (texts.length === 0 || texts.every(isPlainInsertBundlePatch)) continue
+    const patchPath = profileCordisPatchPath(dshHome)
+    const layer = (await readTextIfPresent(patchPath)) ?? '[]\n'
+    const pinned = disablePatchRows(layer, inserted)
+    if ('error' in pinned) continue
+    if (pinned.changed) await writeAtomically(patchPath, pinned.text)
+    await setPluginDisabled(profileDirectory, name, false)
+    repaired.push({ name, rows: inserted })
+  }
+  return repaired
 }
 
 /**

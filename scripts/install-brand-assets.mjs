@@ -3,9 +3,9 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const source = path.join(projectRoot, 'build', 'icon.png')
-const lightSource = path.join(projectRoot, 'build', 'logo-light.png')
-const darkSource = path.join(projectRoot, 'build', 'logo-dark.png')
+const source = path.join(projectRoot, 'build', 'app-icon.png')
+const lightSource = source
+const darkSource = source
 const destinationDirectory = path.join(
   projectRoot,
   'node_modules',
@@ -18,6 +18,14 @@ const lightDestination = path.join(destinationDirectory, 'dsh-desktop-logo-light
 const darkDestination = path.join(destinationDirectory, 'dsh-desktop-logo-dark.png')
 const indexPath = path.join(destinationDirectory, 'index.html')
 const manifestPath = path.join(destinationDirectory, 'manifest.webmanifest')
+const settingsModelsPath = path.join(
+  projectRoot,
+  'node_modules',
+  '@deepseek-ai',
+  'dsh-client-ui-settings-models',
+  'lib',
+  'client.js'
+)
 
 /**
  * Swap the Harness favicon link for the desktop's own.
@@ -76,15 +84,31 @@ await copyFile(lightSource, lightDestination)
 await copyFile(darkSource, darkDestination)
 
 const index = await readFile(indexPath, 'utf8')
-await writeFile(indexPath, replaceIconLink(index, path.relative(projectRoot, indexPath)))
+await writeFile(
+  indexPath,
+  replaceIconLink(index, path.relative(projectRoot, indexPath))
+    .replaceAll('DeepSeek Harness', 'RendCore Harness')
+)
 
 const manifest = await readFile(manifestPath, 'utf8')
 await writeFile(
   manifestPath,
   replaceManifestIcon(manifest, path.relative(projectRoot, manifestPath))
+    .replaceAll('DeepSeek Harness', 'RendCore Harness')
+    .replace('"short_name": "DSH"', '"short_name": "RendCore"')
 )
 
-console.log(`Installed DSH Desktop brand assets: ${[
+const settingsModels = await readFile(settingsModelsPath, 'utf8')
+await writeFile(
+  settingsModelsPath,
+  settingsModels
+    .replaceAll('DeepSeek Harness', 'RendCore Harness')
+    .replaceAll('DSH plugin ecosystem', 'RendCore plugin ecosystem')
+    .replaceAll('DSH 插件生态', 'RendCore 插件生态'),
+  'utf8'
+)
+
+console.log(`Installed RendCore Harness brand assets: ${[
   destination,
   lightDestination,
   darkDestination

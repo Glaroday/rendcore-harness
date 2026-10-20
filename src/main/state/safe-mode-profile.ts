@@ -9,7 +9,7 @@ export const SAFE_MODE_BUNDLES = [
   '@deepseek-ai/dsh-web-app'
 ] as const
 
-export const SAFE_MODE_PATCH = `# Managed by DSH Desktop Safe Mode.
+export const SAFE_MODE_PATCH = `# Managed by RendCore Harness Safe Mode.
 # Third-party bundles and the normal web profile's patch layer are intentionally omitted.
 []
 `

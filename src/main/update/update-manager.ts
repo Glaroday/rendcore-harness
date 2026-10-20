@@ -1,8 +1,15 @@
-import { checkDesktopUpdate } from '../desktop-service'
 import { isPrereleaseVersion, isVersion } from '../desktop-service/service'
 import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
 import electronUpdater from 'electron-updater'
 import type { UpdateStatus } from '../../shared/contracts'
+import {
+  DEFAULT_UPDATE_FEED_CONFIG,
+  readUpdateFeedConfig,
+  resetUpdateFeedConfig,
+  writeUpdateFeedConfig,
+  type UpdateFeedConfig,
+  type UpdateFeedSettings
+} from './update-feed'
 import {
   AUTO_INSTALL_ON_APP_QUIT,
   shouldCheckAfterResume,
@@ -24,10 +31,9 @@ import {
   writeSkippedVersion
 } from './skipped-version'
 import {
-  archiveFeedUrl,
   compareVersions,
   fetchAvailableReleases,
-  STABLE_FEED_URL
+  versionFeedUrl
 } from './version-catalog'
 
 const { autoUpdater } = electronUpdater
@@ -49,6 +55,8 @@ let manualCheck = false
 let manualCheckRequested = false
 let presentationId = 0
 let pendingDowngrade = false
+let updateFeedConfig: UpdateFeedConfig = { feedUrls: [], fallbackToGitHub: true }
+let activeMirrorIndex = -1
 let selectedUpdateVersion: string | undefined
 
 export function getUpdateStatus(): UpdateStatus {
@@ -59,6 +67,7 @@ export function registerUpdateHandlers(options: { locale?: () => 'en' | 'zh' } =
   updateLocale = options.locale ?? updateLocale
   if (handlersRegistered) return
   handlersRegistered = true
+  updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:check', () => checkForUpdates(true))
   ipcMain.handle('updates:install', () => installDownloadedUpdate())
@@ -68,6 +77,17 @@ export function registerUpdateHandlers(options: { locale?: () => 'en' | 'zh' } =
   ipcMain.handle('updates:install-version', (_event, version: unknown) =>
     installSpecificVersion(version)
   )
+  ipcMain.handle('updates:config:get', () => updateFeedSettings())
+  ipcMain.handle('updates:config:set', async (_event, value: unknown) => {
+    updateFeedConfig = await writeUpdateFeedConfig(app.getPath('userData'), parseFeedSettings(value))
+    configureFirstFeed()
+    return updateFeedSettings()
+  })
+  ipcMain.handle('updates:config:reset', async () => {
+    updateFeedConfig = await resetUpdateFeedConfig(app.getPath('userData'))
+    configureFirstFeed()
+    return updateFeedSettings()
+  })
 }
 
 function skipFile(): string {
@@ -158,28 +178,21 @@ export async function checkForUpdates(manual = false, source: UpdateStatus['sour
       let requestManual = manual
       while (true) {
         manualCheck = requestManual
-        const policy = await checkDesktopUpdate(requestManual)
-        // A manual request during the automatic policy check must get its own
-        // decision; showing the automatic cohort miss would be misleading.
-        if (!requestManual && manualCheckRequested) {
-          requestManual = true
-          status.presentationId = presentationId
-          transition({ type: 'check', manual: true })
-          continue
-        }
-        if (!policy.updateAvailable) {
-          transition({ type: 'not-available' })
-          return
-        }
-        selectedUpdateVersion = policy.version
-        autoUpdater.setFeedURL({ provider: 'generic', url: policy.feedUrl })
-        autoUpdater.allowPrerelease = isPrereleaseVersion(policy.version)
+        // The configured mirrors (settings -> 更新镜像代理), then this
+        // repository's own releases. The upstream DSH Desktop update service
+        // used to answer here, and since its versions outrank every RendCore
+        // version it offered upstream builds as updates to this product.
+        configureFirstFeed()
+        autoUpdater.allowPrerelease = false
         autoUpdater.allowDowngrade = false
-        const result = await autoUpdater.checkForUpdates()
-        if (result?.updateInfo.version !== policy.version) throw new Error('Update archive does not match the selected version')
+        const result = await checkUsingConfiguredFeeds()
+        const version = (result as { updateInfo?: { version?: unknown } } | undefined)?.updateInfo
+          ?.version
+        selectedUpdateVersion = typeof version === 'string' ? version : undefined
+        // A manual request during the automatic check must get its own
+        // decision; offering the automatic answer would honour a skip the user
+        // has just taken back.
         if (!requestManual && manualCheckRequested) {
-          // The archive check also runs under the same lock. Re-evaluate the
-          // manual policy before releasing it, without starting a download.
           requestManual = true
           status.presentationId = presentationId
           transition({ type: 'check', manual: true })
@@ -191,8 +204,7 @@ export async function checkForUpdates(manual = false, source: UpdateStatus['sour
       transition({ type: 'error', message: errorMessage(error) })
     } finally {
       checkPromise = undefined
-    }
-  })()
+    }  })()
   await checkPromise
 
   return getUpdateStatus()
@@ -249,7 +261,7 @@ export async function installSpecificVersion(version: unknown): Promise<UpdateSt
       }
       selectedUpdateVersion = version
       pendingDowngrade = true
-      autoUpdater.setFeedURL({ provider: 'generic', url: archiveFeedUrl(version) })
+      autoUpdater.setFeedURL({ provider: 'generic', url: versionFeedUrl(version, updateFeedConfig.feedUrls) })
       autoUpdater.allowDowngrade = true
       autoUpdater.allowPrerelease = isPrereleaseVersion(version)
       await autoUpdater.checkForUpdates()
@@ -262,14 +274,13 @@ export async function installSpecificVersion(version: unknown): Promise<UpdateSt
       transition({ type: 'error', message: errorMessage(error) })
     } finally {
       checkPromise = undefined
-      autoUpdater.setFeedURL({ provider: 'generic', url: STABLE_FEED_URL })
+      configureFirstFeed()
       autoUpdater.allowDowngrade = false
       pendingDowngrade = false
       autoUpdater.allowPrerelease = false
     }
   })()
   await checkPromise
-
   return getUpdateStatus()
 }
 
@@ -295,6 +306,8 @@ export function stopUpdateManager(): void {
 }
 
 function configureUpdater(): void {
+  updateFeedConfig = readUpdateFeedConfig(app.getPath('userData'))
+  configureFirstFeed(false)
   // The download is ours to start: an update the user skipped should not be
   // fetched at all, and update-available is the only place that is known.
   autoUpdater.autoDownload = false
@@ -314,7 +327,7 @@ function configureUpdater(): void {
     transition({ type: 'check', manual: status.manual, source: status.source })
   )
   autoUpdater.on('update-available', (info) => {
-    if (info.version !== selectedUpdateVersion) {
+    if (selectedUpdateVersion !== undefined && info.version !== selectedUpdateVersion) {
       transition({ type: 'error', message: 'Update archive does not match the selected version' })
       return
     }
@@ -338,6 +351,68 @@ function configureUpdater(): void {
   )
   autoUpdater.on('error', (error) => {
     transition({ type: 'error', message: errorMessage(error) })
+  })
+}
+
+function updateFeedSettings(): UpdateFeedSettings & { defaults: string[] } {
+  return {
+    mirrors: [...updateFeedConfig.feedUrls],
+    fallbackToGitHub: updateFeedConfig.fallbackToGitHub,
+    defaults: [...DEFAULT_UPDATE_FEED_CONFIG.feedUrls]
+  }
+}
+
+function parseFeedSettings(value: unknown): UpdateFeedSettings {
+  if (!value || typeof value !== 'object') throw new Error('Invalid update mirror settings.')
+  const raw = value as { mirrors?: unknown; fallbackToGitHub?: unknown }
+  if (!Array.isArray(raw.mirrors) || raw.mirrors.some((mirror) => typeof mirror !== 'string')) {
+    throw new Error('Update mirrors must be an array of URLs.')
+  }
+  return {
+    mirrors: raw.mirrors.map((mirror) => mirror.trim()).filter(Boolean),
+    fallbackToGitHub: raw.fallbackToGitHub !== false
+  }
+}
+
+function configureFirstFeed(applyFeed = true): void {
+  activeMirrorIndex = updateFeedConfig.feedUrls.length > 0 ? 0 : -1
+  if (!applyFeed) return
+  const first = updateFeedConfig.feedUrls[0]
+  if (first) autoUpdater.setFeedURL({ provider: 'generic', url: first })
+  else configureGitHubFeed()
+}
+
+async function checkUsingConfiguredFeeds(): Promise<unknown> {
+  try {
+    return await autoUpdater.checkForUpdates()
+  } catch (firstError) {
+    let lastError: unknown = firstError
+    for (let index = activeMirrorIndex + 1; index < updateFeedConfig.feedUrls.length; index += 1) {
+      const feed = updateFeedConfig.feedUrls[index]
+      if (!feed) continue
+      autoUpdater.setFeedURL({ provider: 'generic', url: feed })
+      activeMirrorIndex = index
+      try {
+        return await autoUpdater.checkForUpdates()
+      } catch (error) {
+        lastError = error
+      }
+    }
+    if (updateFeedConfig.fallbackToGitHub && activeMirrorIndex >= 0) {
+      configureGitHubFeed()
+      activeMirrorIndex = -1
+      return autoUpdater.checkForUpdates()
+    }
+    throw lastError
+  }
+}
+
+function configureGitHubFeed(): void {
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'Glaroday',
+    repo: 'rendcore-harness',
+    releaseType: 'release'
   })
 }
 

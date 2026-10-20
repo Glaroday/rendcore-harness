@@ -227,7 +227,7 @@ Description here.
 
     // Future official v0.8.0 on HEAD: must skip the 0.7.2 prerelease and pick v0.7.1.
     expect(buildPrompt(['--tag', 'v0.8.0'])).toContain('Previous stable tag: v0.7.1')
-  })
+  }, pythonTestTimeoutMs)
 
   it('integrates Feishu release notification into GitHub Actions workflow', () => {
     const workflow = readFileSync(workflowPath, 'utf8')

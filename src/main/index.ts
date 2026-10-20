@@ -60,7 +60,8 @@ import {
 import {
   disableProfilePlugin,
   enableProfilePlugin,
-  listDisabledProfilePlugins
+  listDisabledProfilePlugins,
+  reconcileMarketBundleSwitches
 } from './state/plugin-disable'
 import {
   inspectProfileCompatibility,
@@ -117,6 +118,7 @@ import {
 import { migrateUserPresetPersonaPrefixes } from './state/persona-prefix-migration'
 import { runProfileStartupMaintenance } from './state/profile-startup-maintenance'
 import { cleanupPluginOwnedComponents } from './state/plugin-component-cleanup'
+import { clearLegacyModuleFallbackConflicts } from './state/module-fallback-migration'
 import {
   cleanupVerifiedRemovalBackup,
   confirmPluginRemovalsBooted,
@@ -511,17 +513,17 @@ function applyWindowChromeTheme(window: BrowserWindow, isDark: boolean): void {
 
 function configureAppIdentity(): void {
   if (developmentBuild) {
-    app.setName('DSH Desktop Dev')
-    app.setPath('userData', join(app.getPath('appData'), developmentConfig.profile))
+    app.setName('RendCore Harness Dev')
+    app.setPath('userData', join(app.getPath('appData'), 'rendcore-harness-dev'))
     return
   }
 
-  app.setName('DSH Desktop')
+  app.setName('RendCore Harness')
   // Keep the historical lowercase directory stable across product-name and
   // branding changes. Harness stores workspaces, sessions, credentials, and
   // custom presets below userData, so deriving this path from app.getName()
   // would make an ordinary upgrade look like a fresh installation.
-  app.setPath('userData', join(app.getPath('appData'), 'dsh-desktop'))
+  app.setPath('userData', join(app.getPath('appData'), 'rendcore-harness'))
 }
 
 async function syncNativeTheme(window: BrowserWindow): Promise<void> {
@@ -948,10 +950,10 @@ function ensureTray(): void {
 
   const locale = harnessLocale()
   tray = new Tray(desktopIconPath())
-  tray.setToolTip('DSH Desktop')
+  tray.setToolTip('RendCore Harness')
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: locale === 'zh' ? '显示 DSH Desktop' : 'Show DSH Desktop', click: restoreMainWindow },
+      { label: locale === 'zh' ? '显示 RendCore Harness' : 'Show RendCore Harness', click: restoreMainWindow },
       { type: 'separator' },
       { label: locale === 'zh' ? '退出' : 'Exit', click: () => app.quit() }
     ])
@@ -1299,7 +1301,7 @@ async function quarantineInstalledLaunchAgentsForUpdate(dshHome: string): Promis
   }
   if (result.failures.length > 0) {
     for (const failure of result.failures) runtime.note(`[desktop] pre-update launch agent: ${failure}`)
-    throw new Error('Unable to stop background services before replacing DSH Desktop.')
+    throw new Error('Unable to stop background services before replacing RendCore Harness.')
   }
 }
 
@@ -1389,6 +1391,30 @@ async function enterMigrationSafeRecovery(
   })
 }
 
+/**
+ * Pin a market switch that Harness would otherwise use to skip a bundle the
+ * profile still declares: the bundle never composes, so the plugin has no
+ * loader rows left for the market's own toggle to flip and cannot be switched
+ * back on from any surface. Runs with Harness stopped, before the launch that
+ * would skip the bundle again; see reconcileMarketBundleSwitches for why the
+ * user patch layer is where the switch has to end up.
+ */
+async function reconcileStuckMarketSwitches(dshHome: string): Promise<void> {
+  try {
+    const repaired = await reconcileMarketBundleSwitches(dshHome)
+    if (repaired.length === 0) return
+    runtime.note(
+      `[desktop] pinned unreachable market switch(es) into the patch layer: ${repaired
+        .map((entry) => `${entry.name} (${entry.rows.join(', ')})`)
+        .join('; ')}`
+    )
+  } catch (error) {
+    runtime.note(
+      `[desktop] market switch reconciliation failed: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+}
+
 function launchHarness(): Promise<void> {
   if (harnessLaunchOperation) return harnessLaunchOperation
 
@@ -1414,6 +1440,11 @@ function launchHarness(): Promise<void> {
         // Profile writes, but before any operation invokes pnpm.
         const pinned = await ensureStoreDirPinned(dshHome)
         if (pinned) runtime.note(`[desktop] pinned the profile's pnpm store: ${pinned}`)
+        await clearLegacyModuleFallbackConflicts({
+          dshHome,
+          installationNodeModules: join(app.getAppPath(), 'node_modules'),
+          note: (line) => runtime.note(line)
+        })
       },
       enforcePendingPluginRemovals: () =>
         enforcePendingPluginRemovals(dshHome, (line) => runtime.note(line)),
@@ -1476,6 +1507,7 @@ function launchHarness(): Promise<void> {
     maintenanceRecoveryLocked = false
     maintenanceAllowedRestoreId = undefined
     runtime.note('[desktop] profile maintenance done')
+    await reconcileStuckMarketSwitches(dshHome)
     await refreshMigrationRecoveryLock(dshHome)
     void auditInstalledLaunchAgents(dshHome)
       .then(() => {
@@ -1716,7 +1748,7 @@ function registerHarnessHandlers(): void {
   ipcMain.removeHandler('harness:restart')
   ipcMain.handle('harness:restart', async (event) => {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
-      throw new Error('Harness restart is only available from the DSH Desktop window.')
+      throw new Error('Harness restart is only available from the RendCore Harness window.')
     }
     if (runtime.snapshot().phase !== 'ready') {
       throw new Error('Harness is not ready to restart.')
@@ -1786,7 +1818,7 @@ function registerHarnessHandlers(): void {
   ipcMain.handle('desktop-titlebar:set-theme', (event, isDark: unknown) => {
     assertTrustedMainWindowEvent(event)
     if (typeof isDark !== 'boolean') {
-      throw new Error('The DSH Desktop titlebar theme must be a boolean.')
+      throw new Error('The RendCore Harness titlebar theme must be a boolean.')
     }
     if (process.platform === 'win32' && mainWindow) {
       applyWindowChromeTheme(mainWindow, isDark)
@@ -1814,7 +1846,7 @@ function assertTrustedMainWindowEvent(event: IpcMainInvokeEvent): void {
     event.sender !== mainWindow.webContents ||
     event.senderFrame !== mainWindow.webContents.mainFrame
   ) {
-    throw new Error('This action is only available from the main DSH Desktop window.')
+    throw new Error('This action is only available from the main RendCore Harness window.')
   }
 }
 
@@ -1851,8 +1883,8 @@ async function showAbout(window: BrowserWindow): Promise<void> {
   const checkForUpdatesLabel = locale === 'zh' ? '检查更新' : 'Check for Updates'
   const result = await dialog.showMessageBox(window, {
     type: 'info',
-    title: 'DSH Desktop',
-    message: locale === 'zh' ? '关于 DSH Desktop' : 'About DSH Desktop',
+    title: 'RendCore Harness',
+    message: locale === 'zh' ? '关于 RendCore Harness' : 'About RendCore Harness',
     detail: aboutDetail(
       app.getVersion(),
       bundledHarnessVersion(bundledRuntimeRoot()),
@@ -2004,7 +2036,7 @@ function showUnexpectedError(error: unknown): void {
   void (async () => {
     while (!quitting && !gpuFallbackRelaunching) {
       const { response } = await dialog.showMessageBox({
-        type: 'error', title: 'DSH Desktop',
+        type: 'error', title: 'RendCore Harness',
         message: zh ? '应用窗口无法继续加载' : 'The application window could not load',
         detail: message, buttons: zh ? ['退出', '重新启动', '恢复配置'] : ['Quit', 'Restart', 'Recover Configuration'],
         defaultId: 0, cancelId: 0, noLink: true
@@ -2019,7 +2051,7 @@ function showUnexpectedError(error: unknown): void {
     }
   })().catch((failure: unknown) => {
     console.error('[desktop] native recovery failed', failure)
-    dialog.showErrorBox('DSH Desktop', message)
+    dialog.showErrorBox('RendCore Harness', message)
   }).finally(() => { nativeRecoveryActive = false })
 }
 
@@ -3156,7 +3188,7 @@ function installMenu(): void {
           label: app.name,
           submenu: [
             {
-              label: isChinese ? '关于 DSH Desktop' : 'About DSH Desktop',
+              label: isChinese ? '关于 RendCore Harness' : 'About RendCore Harness',
               click: () => {
                 if (mainWindow && !mainWindow.isDestroyed()) {
                   void showAbout(mainWindow).catch(showUnexpectedError)
@@ -3264,7 +3296,7 @@ async function showMobilePairing(): Promise<void> {
     const options: MessageBoxOptions = {
       type: 'info',
       message: 'Harness is still starting.',
-      detail: 'Wait until DSH Desktop is ready, then connect your phone again.',
+      detail: 'Wait until RendCore Harness is ready, then connect your phone again.',
       buttons: ['OK']
     }
     await (mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options))

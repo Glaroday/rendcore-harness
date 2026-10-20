@@ -76,3 +76,87 @@
       config:
         resources: !!js process.env.DSH_DESKTOP_OFFICE_RESOURCES
         cli: !!js process.env.DSH_DESKTOP_OFFICE_CLI
+
+# RendCore is an OpenAI-compatible gateway. Credentials remain user-owned and
+# writable from Settings; no API key is embedded in the application.
+- id: llm-pi-ai
+  config:
+    providers:
+      rendcore:
+        displayName: RendCore
+        apiKeyEnv: RENDCORE_API_KEY
+        api: openai-completions
+        baseURL: http://43.248.102.104:18704/v1
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: true
+          supportsUsageInStreaming: true
+          maxTokensField: max_tokens
+        defaultContextWindow: 1050000
+        # The gateway rejects max_tokens above 65536, whatever the capability
+        # service reports as the model's own output ceiling.
+        defaultMaxTokens: 65536
+        defaultInput: [text]
+        models:
+          - id: gpt-5.6-sol
+            name: GPT-5.6 Sol
+            contextWindow: 1050000
+            maxTokens: 65536
+            input: [text, image]
+            reasoningEfforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
+          - id: gemini-3.7-flash-high
+            name: Gemini 3.7 Flash High
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+          - id: claude-opus-4-6-thinking
+            name: Claude Opus 4.6 Thinking
+            contextWindow: 1000000
+            maxTokens: 65536
+            input: [text, image]
+          - id: claude-sonnet-4-6
+            name: Claude Sonnet 4.6
+            contextWindow: 1000000
+            maxTokens: 65536
+            input: [text, image]
+          - id: gpt-oss-120b-medium
+            name: GPT-OSS 120B Medium
+            contextWindow: 131072
+            maxTokens: 65536
+            input: [text]
+          - id: Qwen3.8-35B-A3B
+            name: Qwen3.8-35B-A3B
+            contextWindow: 1000000
+            input: [text, image]
+          - id: ox-alpha-free
+            name: ox-alpha-free
+            contextWindow: 1000000
+            maxTokens: 65536
+            input: [text, image]
+
+- id: compaction-basic
+  config:
+    auto: true
+    thresholdRatio: 0.7
+    retainRatio: 0.12
+    summarizationProvider: rendcore
+    summarizationModel: gpt-5.6-sol
+    maxTokens: 8192
+    compactionRetries: 2
+    maxOverflowRetries: 3
+
+- insert:
+    - id: model-fix
+      name: dsh-model-fix
+      config:
+        modelPattern: '^muse-spark'
+        providers: []
+
+- id: web
+  config:
+    searchProvider: modsearch
+
+- id: agent-default-model
+  config:
+    provider: rendcore
+    model: gpt-5.6-sol
