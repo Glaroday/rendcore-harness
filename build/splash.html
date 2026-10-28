@@ -28,7 +28,7 @@
       }
       html[data-platform="windows"] main { padding-top: 70px; }
       .markFrame { display: grid; place-items: center; }
-      .mark { grid-area: 1 / 1; width: 196px; height: auto; image-rendering: pixelated; }
+      .mark { grid-area: 1 / 1; width: 196px; height: auto; }
       .markDark { display: none; }
       .title { margin: 0; font-size: 23px; font-weight: 650; letter-spacing: -0.02em; }
       .status { margin: -4px 0 0; color: #777a80; font-size: 13px; }
@@ -42,7 +42,6 @@
       :root[data-theme='dark'] .markLight { display: none; }
       :root[data-theme='dark'] .markDark {
         display: block;
-        filter: brightness(2.4) saturate(0.72) drop-shadow(0 0 7px rgba(111, 134, 255, 0.16));
       }
       :root[data-theme='dark'] .status {
         color: #9ca0a8;

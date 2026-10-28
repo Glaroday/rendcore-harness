@@ -13,7 +13,7 @@ const releaseAssets = [
 ]
 
 /** The exact Harness build every `@deepseek-ai/dsh-*` production dep is pinned to. */
-const HARNESS_VERSION = '0.2.1-rc.2'
+const HARNESS_VERSION = '0.2.1-rc.3'
 
 describe('GitHub release contract', () => {
   it('keeps the package and lockfile versions aligned', async () => {
@@ -151,13 +151,14 @@ describe('GitHub release contract', () => {
       expect(packageJson.dependencies[packageName]).toBeUndefined()
       expect(packageLock.packages[`node_modules/${packageName}`]).toBeUndefined()
     }
-    // Official bundles own these, including the rc.2 retrieval API and model badge.
+    // Official bundles own these, including retrieval, model badges and entry customization.
     for (const packageName of [
       '@deepseek-ai/dsh-tool-terminal',
       '@deepseek-ai/dsh-tool-session-query',
       '@deepseek-ai/dsh-session-title-all-prompts-llm',
       '@deepseek-ai/dsh-web-deepseek-api',
-      '@deepseek-ai/dsh-client-ui-deepseek-model-label-1017'
+      '@deepseek-ai/dsh-client-ui-deepseek-model-label-1017',
+      '@deepseek-ai/dsh-client-ui-entry-customization'
     ]) {
       expect(packageJson.dependencies[packageName]).toBeUndefined()
       expect(packageLock.packages[`node_modules/${packageName}`]).toBeDefined()
@@ -247,6 +248,10 @@ describe('GitHub release contract', () => {
       to: 'splash.html'
     })
     expect(packageJson.build.extraResources).toContainEqual({
+      from: 'build/startup-whale.gif',
+      to: 'startup-whale.gif'
+    })
+    expect(packageJson.build.extraResources).toContainEqual({
       from: 'build/dsh-loader.gif',
       to: 'dsh-loader.gif'
     })
@@ -327,7 +332,7 @@ describe('GitHub release contract', () => {
     expect(splash).toContain('src="dsh-loader-dark.gif"')
     expect(splash).toContain("document.documentElement.dataset.theme = splashTheme === 'dark'")
     expect(splash).toContain(":root[data-theme='dark']")
-    expect(splash).toContain('brightness(2.4) saturate(0.72)')
+    expect(splash).not.toContain('brightness(2.4) saturate(0.72)')
     expect(splash).not.toContain('filter: invert(1)')
     expect(splash).not.toContain('class="track"')
     expect(splash).toContain('position: fixed;')
@@ -479,6 +484,11 @@ describe('GitHub release contract', () => {
     expect(workflow).toContain('-SessionVariable harnessSession')
     expect(workflow).toContain('-WebSession $harnessSession')
     expect(workflow).toContain('Packaged Windows Harness smoke test passed.')
+    expect(workflow).toContain('$desktop.Kill($true)')
+    expect(workflow).toContain('$desktop.WaitForExit(10000)')
+    expect(workflow).toContain('node scripts/archive-windows-release.mjs "$env:ARCHIVE_DIST"')
+    expect(workflow).toContain("&& 'dist' || 'dist-dev'")
+    expect(workflow).not.toContain('tar -czf dist/win-unpacked.tar.gz')
     expect(workflow).toContain('payload = @{ args = @{ request = $request } }')
     expect(workflow).toContain("Invoke-HarnessRpc 'workspace/create'")
     expect(workflow).toContain("Invoke-HarnessRpc 'session/create'")
@@ -535,7 +545,7 @@ describe('GitHub release contract', () => {
     )
   })
 
-  it('builds the runtime once per native job before tests and packaging', async () => {
+  it('builds once before shared checks and each native packaging job', async () => {
     const workflow = parse(await readFile(path.join(projectRoot, '.github/workflows/release.yml'), 'utf8')) as {
       jobs: Record<string, { steps: Array<{ run?: string; uses?: string; with?: Record<string, unknown> }> }>
     }
@@ -760,7 +770,8 @@ describe('AI-organized GitHub release body', () => {
     const yml = await load()
     expect(yml).toContain('RELEASE_NOTES_MODEL: gpt-6-luna')
     expect(yml).not.toContain('gpt-5.6-sol')
-    expect(yml.match(/--model "\$RELEASE_NOTES_MODEL"/g)).toHaveLength(3)
+    // Three detailed notifications plus the separate, fail-closed popup summary.
+    expect(yml.match(/--model "\$RELEASE_NOTES_MODEL"/g)).toHaveLength(4)
     expect(yml.match(/2>"\$error_log"/g)).toHaveLength(3)
     expect(yml).not.toContain('2>/dev/null')
     expect(yml.match(/sed -n '1,20\{s\/\^\/copilot: \/;p;\}'/g)).toHaveLength(3)
