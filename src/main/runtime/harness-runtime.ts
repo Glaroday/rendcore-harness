@@ -13,6 +13,8 @@ import { SAFE_MODE_PROFILE } from '../state/safe-mode-profile'
 import { prepareHostDisabledPluginsPatch } from '../state/host-disabled-plugins'
 import { prepareHostPluginSourcesPatch } from '../state/host-plugin-sources'
 import { prepareRendCoreModelCatalog } from './rendcore-model-catalog'
+import { startRendCoreGateway, type RendCoreGateway } from './rendcore-gateway'
+import { migrateRendCoreEndpoints } from './rendcore-endpoint-migration'
 import { parsePluginStartupFailures, type PluginStartupFailure } from '../../shared/plugin-startup-failure'
 import { removeStaleWriterLocks } from './stale-writer-locks'
 import { inspectStartupConfiguration, repairStartupConfig, validModelEndpoint } from '../state/startup-config-recovery'
@@ -454,6 +456,7 @@ export function isHarnessStartupProbeHealthy(
 
 export class HarnessRuntime {
   private child?: HarnessChildProcess
+  private modelGateway?: RendCoreGateway
   private logStream?: WriteStream
   private phase: RuntimePhase = 'idle'
   private message = 'Harness is not running.'
@@ -529,6 +532,7 @@ export class HarnessRuntime {
     const shellEnvironment = await prewarmShellEnvironment()
     let configurationProblems
     try {
+      if (profile !== SAFE_MODE_PROFILE) await migrateRendCoreEndpoints(this.options.dshHome, profile)
       configurationProblems = await inspectStartupConfiguration(this.options.dshHome, profile, shellEnvironment, launchDirectory)
     } catch (error) {
       this.writeLog(`[desktop] configuration inspection failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -582,16 +586,20 @@ export class HarnessRuntime {
 
     await migrateLegacyPresetSetting(this.options.dshHome, (line) => this.writeLog(line))
     await migrateDshPetDisplayConfig(this.options.dshHome, (line) => this.writeLog(`[desktop] ${line}`))
-    const effectivePatchPaths = profile === SAFE_MODE_PROFILE
-      ? patchPaths
-      : [
-          (await prepareRendCoreModelCatalog(
-            patchPaths[0]!,
-            this.options.dshHome,
-            (line) => this.writeLog(line)
-          )).path,
-          ...patchPaths.slice(1)
-        ]
+    let effectivePatchPaths = patchPaths
+    if (profile !== SAFE_MODE_PROFILE) {
+      try {
+        this.modelGateway = await startRendCoreGateway({ log: line => this.writeLog(line) })
+        const catalog = await prepareRendCoreModelCatalog(
+          patchPath, this.options.dshHome, line => this.writeLog(line), this.modelGateway.baseURL
+        )
+        effectivePatchPaths = [catalog.path, ...patchPaths.slice(1)]
+      } catch (error) {
+        this.setState('failed', `RendCore model gateway could not start: ${error instanceof Error ? error.message : String(error)}`)
+        await this.closeModelGateway()
+        return
+      }
+    }
 
     const preferredPort = this.options.preferredPort ?? DEFAULT_HARNESS_PORT
     const { port, usedPreferredPort } = await reserveLoopbackPort(preferredPort)
@@ -727,6 +735,7 @@ ${cause}`
   }
 
   async stop(): Promise<void> {
+    await this.closeModelGateway()
     const child = this.child
     if (!child) {
       this.closeLog()
@@ -756,11 +765,21 @@ ${cause}`
     if (!exited && child.exitCode === null) child.kill('SIGKILL')
   }
 
+  private async closeModelGateway(): Promise<void> {
+    const gateway = this.modelGateway
+    this.modelGateway = undefined
+    if (!gateway) return
+    try { await gateway.close() } catch (error) {
+      this.writeLog(`[desktop] RendCore gateway cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   private setState(
     phase: RuntimePhase,
     message: string,
     failureReason?: RuntimeSnapshot['failureReason']
   ): void {
+    if (phase === 'failed') void this.closeModelGateway()
     this.phase = phase
     this.message = message
     this.failureReason = failureReason

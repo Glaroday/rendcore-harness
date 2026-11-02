@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parse, stringify } from 'yaml'
+import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { RENDCORE_API_ENDPOINTS, RENDCORE_CAPABILITIES_ENDPOINT } from './rendcore-gateway'
 
-export const RENDCORE_MODELS_ENDPOINT = 'http://43.248.102.104:18704/v1/models'
-export const RENDCORE_MODEL_CAPABILITIES_ENDPOINT = 'http://43.248.102.104:8600/api/models'
+export const RENDCORE_MODELS_ENDPOINT = `${RENDCORE_API_ENDPOINTS[0]}/models`
+export const RENDCORE_MODEL_CAPABILITIES_ENDPOINT = RENDCORE_CAPABILITIES_ENDPOINT
 const SAFE_DEFAULT_MODEL = 'gpt-6.1-sol'
 
 export interface RendCoreModel {
@@ -44,7 +46,8 @@ interface CatalogResult {
 export async function prepareRendCoreModelCatalog(
   basePatchPath: string,
   dshHome: string,
-  log: (line: string) => void
+  log: (line: string) => void,
+  baseURL: string = RENDCORE_API_ENDPOINTS[0]
 ): Promise<CatalogResult> {
   const cachedPath = join(dshHome, 'rendcore-online.patch.yml')
   await sanitizeStoredModels(dshHome, log)
@@ -62,7 +65,7 @@ export async function prepareRendCoreModelCatalog(
   if (apiKey) {
     try {
       const payload = await fetchJson(
-        RENDCORE_MODELS_ENDPOINT,
+        `${baseURL}/models`,
         { Authorization: `Bearer ${apiKey}` },
         15_000
       )
@@ -81,8 +84,8 @@ export async function prepareRendCoreModelCatalog(
   if (models.length > 0) {
     models = mergeRememberedCapabilities(models, remembered, false)
     const base = await readFile(basePatchPath, 'utf8')
-    const rendered = replaceCatalog(base, models)
-    await writeFile(cachedPath, rendered, 'utf8')
+    const rendered = replaceCatalog(replaceBaseURL(base, baseURL), models)
+    await writeManagedText(cachedPath, rendered)
     await syncStoredModels(dshHome, models)
     await writeCapabilityCache(dshHome, models, remembered, log)
     await repairDefaultModel(dshHome, new Set(models.map((model) => model.id)))
@@ -96,7 +99,7 @@ export async function prepareRendCoreModelCatalog(
       const cachedModels = mergeRememberedCapabilities(modelsFromPatch(parse(cached)), remembered, true)
       if (cachedModels.length > 0) {
         const base = await readFile(basePatchPath, 'utf8')
-        await writeFile(cachedPath, replaceCatalog(base, cachedModels), 'utf8')
+        await writeManagedText(cachedPath, replaceCatalog(replaceBaseURL(base, baseURL), cachedModels))
         await syncStoredModels(dshHome, cachedModels)
         await repairDefaultModel(dshHome, new Set(cachedModels.map((model) => model.id)))
         log(`[desktop] using sanitized cached RendCore model catalog (${cachedModels.length} models)`)
@@ -108,7 +111,17 @@ export async function prepareRendCoreModelCatalog(
   }
 
   log('[desktop] using bundled RendCore model catalog')
-  return { path: basePatchPath, models: [], source: 'bundled' }
+  await writeManagedText(cachedPath, replaceBaseURL(await readFile(basePatchPath, 'utf8'), baseURL))
+  return { path: cachedPath, models: [], source: 'bundled' }
+}
+
+// Preserve the composition's comments and expression tags, changing only this provider.
+function replaceBaseURL(source: string, baseURL: string): string {
+  return source.replace(/(\n      rendcore:\r?\n[\s\S]*?\n        baseURL:\s*)[^\r\n]+/, (_match, prefix: string) => `${prefix}${baseURL}`)
+}
+
+async function writeManagedText(path: string, text: string): Promise<void> {
+  await writeFileAtomic(path, text, { mode: 0o600 })
 }
 
 export function parseCapabilities(payload: unknown): RendCoreModel[] {
@@ -221,7 +234,7 @@ async function syncStoredModels(dshHome: string, models: RendCoreModel[]): Promi
   const rendcore = objectValue(providers?.rendcore)
   if (!rendcore || !Array.isArray(rendcore.models)) return
   rendcore.models = models.map((model) => publicModel(model))
-  await writeFile(settingsPath, stringify(settings), 'utf8')
+  await writeManagedText(settingsPath, stringify(settings))
 }
 
 async function sanitizeStoredModels(dshHome: string, log: (line: string) => void): Promise<void> {
@@ -236,7 +249,7 @@ async function sanitizeStoredModels(dshHome: string, log: (line: string) => void
     const models = normalizeStoredModelList(rendcore.models)
     if (models.length === 0) return
     rendcore.models = models
-    await writeFile(settingsPath, stringify(settings), 'utf8')
+    await writeManagedText(settingsPath, stringify(settings))
   } catch (error) {
     log(`[desktop] could not sanitize stored RendCore models: ${message(error)}`)
   }
@@ -267,7 +280,7 @@ async function repairDefaultModel(dshHome: string, available: Set<string>): Prom
   const selected = objectValue(settings?.['agent-default-model'])
   if (selected?.provider !== 'rendcore' || typeof selected.model !== 'string' || available.has(selected.model)) return
   selected.model = available.has(SAFE_DEFAULT_MODEL) ? SAFE_DEFAULT_MODEL : [...available][0]
-  await writeFile(settingsPath, stringify(settings), 'utf8')
+  await writeManagedText(settingsPath, stringify(settings))
 }
 
 async function readStoredApiKey(dshHome: string): Promise<string | undefined> {
@@ -285,9 +298,9 @@ async function fetchJson(url: string, headers: Record<string, string> | undefine
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch(url, { headers, signal: controller.signal })
+    const response = await fetch(url, { headers, signal: controller.signal, redirect: 'error' })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    return response.json()
+    return await response.json()
   } finally {
     clearTimeout(timeout)
   }
@@ -460,7 +473,7 @@ async function writeCapabilityCache(
         reasoningEfforts: model.reasoningEfforts
       }
     }
-    await writeFile(join(dshHome, CAPABILITY_CACHE_FILE), `${JSON.stringify({ version: 1, models: entries }, undefined, 2)}\n`, 'utf8')
+    await writeManagedText(join(dshHome, CAPABILITY_CACHE_FILE), `${JSON.stringify({ version: 1, models: entries }, undefined, 2)}\n`)
   } catch (error) {
     log(`[desktop] could not remember RendCore capabilities: ${message(error)}`)
   }
