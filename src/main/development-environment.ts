@@ -1,12 +1,21 @@
+/**
+ * Unpackaged Windows development deadlocks in `@deepseek-ai/dsh-hmr`:
+ * the watcher never becomes ready, so profile boot never finishes.
+ * Packaged launches keep the upstream service.
+ */
+export function skipBlockingWindowsDevHmr(packaged: boolean, platform: NodeJS.Platform): boolean {
+  return !packaged && platform === 'win32'
+}
+
 /** Development overrides isolate concurrent worktrees without changing production identity. */
 export function developmentEnvironment(development: boolean, defaultHarnessPort: number, env: NodeJS.ProcessEnv = process.env): {
   profile: string
   harnessPort: number
   mobilePort: number
 } {
-  if (!development) return { profile: 'dsh-desktop', harnessPort: defaultHarnessPort, mobilePort: 43127 }
-  const profile = env.DSH_DEV_PROFILE || 'dsh-desktop-dev'
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(profile) || profile === 'dsh-desktop') {
+  if (!development) return { profile: 'rendcore-harness', harnessPort: defaultHarnessPort, mobilePort: 43127 }
+  const profile = env.DSH_DEV_PROFILE || 'rendcore-harness-dev'
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(profile) || profile === 'rendcore-harness') {
     throw new Error('DSH_DEV_PROFILE must be a separate development directory name.')
   }
   const port = (value: string | undefined, fallback: number, name: string): number => {

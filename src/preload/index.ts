@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { createSidebarBrowserBridge } from './sidebar-browser'
+import { isHarnessBootPage } from '../shared/harness-boot'
 import { installHarnessBootBridge } from './harness-boot'
 import type { UpdateLocale } from './update-view'
 import { setupDesktopStoragePersistence } from './desktop-storage'
@@ -38,7 +40,7 @@ const bootCover = mountBootCover(location.href, {
   locale
 })
 
-installHarnessBootBridge(() => {
+const reportHarnessBootFailure = installHarnessBootBridge(() => {
   bootFailureTriggered = true
   bootCover?.holdForFailure()
 })
@@ -107,7 +109,10 @@ function queueBootFailure(message?: string): void {
     if (!errorText) return
 
     bootFailureTriggered = true
-    void ipcRenderer.invoke('harness:open-recovery', errorText)
+    const report = reportHarnessBootFailure
+      ? reportHarnessBootFailure(errorText)
+      : ipcRenderer.invoke('harness:open-recovery', errorText)
+    void report.catch((error: unknown) => console.error('[desktop] could not report boot failure', error))
   }, BOOT_FAILURE_SETTLE_MS)
 }
 
@@ -576,6 +581,8 @@ window.addEventListener('pagehide', () => {
 contextBridge.exposeInMainWorld(
   'dshDesktop',
   Object.freeze({
+    protocolVersion: 1,
+    browser: process.isMainFrame && isHarnessBootPage(location.href) ? createSidebarBrowserBridge() : undefined,
     openMobilePairing: (): Promise<void> => ipcRenderer.invoke('mobile:open-pairing'),
     getMobileStatus: (): Promise<{ connected?: boolean }> => ipcRenderer.invoke('mobile:status'),
     onMobileStatus: (listener: (status: { connected: boolean }) => void): (() => void) => {
@@ -595,7 +602,6 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.invoke('desktop-host-plugin:status'),
     setBuiltInImageGenerationEnabled: (enabled: boolean): Promise<{ ok: boolean; enabled?: boolean; restartRequired?: boolean; reason?: string }> =>
       ipcRenderer.invoke('desktop-host-plugin:set-enabled', enabled),
-    uninstallMarket: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('market:uninstall'),
     openInFinder: (path: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('harness:open-in-finder', path)
   })
 )

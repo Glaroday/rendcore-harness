@@ -8,7 +8,7 @@ import { RENDCORE_API_ENDPOINTS } from './rendcore-gateway'
 function managedEndpoint(value: unknown): boolean {
   if (typeof value !== 'string') return false
   const normalized = value.replace(/\/+$/, '')
-  return ['http://43.248.102.104:18704/v1', 'http://47.103.24.134:18036/v1',
+  return ['http://a.frp0.asia:8317/v1', 'http://43.248.102.104:18704/v1', 'http://47.103.24.134:18036/v1',
     ...RENDCORE_API_ENDPOINTS].includes(normalized) ||
     /^http:\/\/127\.0\.0\.1:\d+\/rendcore-[a-f0-9]{48}\/v1$/.test(normalized)
 }

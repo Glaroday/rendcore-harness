@@ -16,6 +16,10 @@ describe('RendCore endpoint override migration', () => {
     expect(removeManagedEndpointOverrides('llm-pi-ai:\n  providers:\n    rendcore:\n      baseURL: http://47.103.24.134:18036/v1\n')).not.toContain('baseURL')
   })
 
+  it.each(['http://a.frp0.asia:8317/v1', 'http://a.88frp.asia:8317/v1'])('migrates managed fallback %s', endpoint => {
+    expect(removeManagedEndpointOverrides(`- id: llm-pi-ai\n  config:\n    providers:\n      rendcore:\n        baseURL: ${endpoint}\n`)).not.toContain('baseURL')
+  })
+
   it('preserves genuinely custom endpoints and dynamic expressions', () => {
     for (const value of ['https://custom.example/v1', '!!js process.env.CUSTOM_ENDPOINT']) {
       const source = `- id: llm-pi-ai\n  config:\n    providers:\n      rendcore:\n        baseURL: ${value}\n`

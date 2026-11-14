@@ -13,7 +13,8 @@ describe('DSH Desktop sidebar branding', () => {
     )
 
     expect(client).toContain('document.documentElement.dataset.platform === "darwin"')
-    expect(client).toContain('document.documentElement.hasAttribute("data-windows-titlebar") ? 0 : 56')
+    expect(client).toContain('document.documentElement.hasAttribute("data-windows-titlebar")')
+    expect(client).toContain('const collapsedWidth = drawer || darwin || windowsTitlebar ? 0 : 56')
     expect(client).toContain('sidebar === 0 ? collapsedWidth')
   })
 
@@ -42,17 +43,17 @@ describe('DSH Desktop sidebar branding', () => {
       await readFile(path.join(projectRoot, 'package.json'), 'utf8')
     ) as { scripts: { postinstall: string } }
     const installer = await readFile(
-      path.join(projectRoot, 'scripts', 'install-brand-assets.mjs'),
+      path.join(projectRoot, 'scripts', 'release', 'install-brand-assets.mjs'),
       'utf8'
     )
 
-    expect(packageJson.scripts.postinstall).toContain('node scripts/install-brand-assets.mjs')
+    expect(packageJson.scripts.postinstall).toContain('node scripts/release/install-brand-assets.mjs')
     expect(installer).toContain("'build', 'app-icon.png'")
     expect(installer).toContain("'dsh-desktop-logo.png'")
     expect(installer).toContain("'dsh-desktop-logo-light.png'")
     expect(installer).toContain("'dsh-desktop-logo-dark.png'")
     expect(installer).toContain('<link rel="icon" type="image/png" href="/dsh-desktop-logo.png" />')
-    expect(installer).toContain("target.src = '/dsh-desktop-logo.png'")
-    expect(installer).toContain("target.sizes = '1254x1254'")
+    expect(installer).toContain("src: '/dsh-desktop-logo.png'")
+    expect(installer).toContain("sizes: '1254x1254'")
   })
 })

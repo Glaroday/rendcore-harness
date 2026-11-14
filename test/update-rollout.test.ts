@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../src/main/desktop-service', () => ({ checkDesktopUpdate: vi.fn() }))
 vi.mock('../src/main/update/version-catalog', async importOriginal => ({ ...await importOriginal<object>(), fetchAvailableReleases: mocks.catalog }))
 vi.mock('electron-updater', () => ({ default: { autoUpdater: mocks.updater } }))
-vi.mock('electron', () => ({ app: { isPackaged: true, getVersion: () => '0.8.0', getPath: () => '/nonexistent-desktop-test', isReady: () => true }, BrowserWindow: { getAllWindows: () => [] }, powerMonitor: { on: vi.fn(), removeListener: vi.fn() }, ipcMain: { handle: vi.fn() } }))
+vi.mock('electron', () => ({ app: { isPackaged: true, getVersion: () => '0.8.0', getPath: () => '/nonexistent-desktop-test', isReady: () => true }, BrowserWindow: { getAllWindows: () => [] }, powerMonitor: { on: vi.fn(), removeListener: vi.fn() }, net: { fetch: vi.fn() }, ipcMain: { handle: vi.fn() } }))
 vi.mock('../src/main/update/update-policy', async importOriginal => ({ ...await importOriginal<object>(), supportsAutoUpdates: () => true }))
 
 /** The first configured mirror: where every check starts, and where a pin lands. */

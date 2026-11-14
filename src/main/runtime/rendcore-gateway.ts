@@ -3,7 +3,7 @@ import { createServer, request, type IncomingMessage, type ServerResponse } from
 
 export const RENDCORE_API_ENDPOINTS = [
   'http://47.103.24.134:18036/v1',
-  'http://a.frp0.asia:8317/v1'
+  'http://a.88frp.asia:8317/v1'
 ] as const
 export const RENDCORE_CAPABILITIES_ENDPOINT = 'http://47.103.24.134:8600/api/models'
 

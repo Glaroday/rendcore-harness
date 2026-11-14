@@ -15,6 +15,6 @@ describe('RendCore startup assets', () => {
     const whale = await readFile(resolve(dir, 'startup-whale.gif'))
     expect(light.equals(expected)).toBe(true)
     expect(dark.equals(expected)).toBe(true)
-    expect(dark.equals(whale)).toBe(false)
+    expect(dark.equals(whale)).toBe(true)
   })
 })

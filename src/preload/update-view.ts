@@ -1,6 +1,12 @@
 import type { AvailableRelease, UpdateStatus } from '../shared/contracts'
 
-export type UpdateLocale = 'en' | 'zh'
+import type { DesktopLocale } from '../shared/desktop-locale'
+import { updateText } from '../shared/desktop-update-messages'
+
+export type UpdateLocale = DesktopLocale
+
+/** Internal presentation marker: keep generic failures translatable after a locale change. */
+export const UPDATE_ACTION_FAILED = 'dsh-desktop:update-action-failed'
 
 export function shouldShowUpdate(status: UpdateStatus, allowManualPresentation = true): boolean {
   if (['available', 'downloading', 'downloaded'].includes(status.phase)) return true
@@ -38,80 +44,29 @@ export interface UpdateHeadline {
  * require parsing a version string out of a sentence.
  */
 export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): UpdateHeadline {
-  const zh = locale === 'zh'
+  const t = (key: Parameters<typeof updateText>[1], values = {}) => updateText(locale, key, values)
   const version = status.availableVersion ? `v${status.availableVersion}` : ''
-
-  if (status.downgrade && status.availableVersion) {
-    return {
-      title: zh ? `正在降级到 ${version}` : `Downgrading to ${version}`,
-      description: zh
-        ? `将当前 v${status.currentVersion} 回退到 ${version}`
-        : `Rolling back v${status.currentVersion} to ${version}`
-    }
-  }
-
+  if (status.downgrade && status.availableVersion) return { title: t('downgrading', { version }), description: t('rollingBack', { current: status.currentVersion, version }) }
   switch (status.phase) {
-    case 'checking':
-      return {
-        title: zh ? '正在检查更新' : 'Checking for updates',
-        description: zh ? `当前 v${status.currentVersion}` : `Currently on v${status.currentVersion}`
-      }
-    case 'available':
-      return {
-        title: zh ? `检测到新版本 ${version}` : `New version ${version} available`,
-        description: zh
-          ? `${version} 已发布，同意后开始下载。`
-          : `${version} is ready to download.`
-      }
-    case 'downloading':
-      return {
-        title: zh ? '正在下载更新' : 'Downloading update',
-        description: zh ? `${version} · ${Math.round(status.percent ?? 0)}%` : `${version} · ${Math.round(status.percent ?? 0)}%`
-      }
-    case 'downloaded':
-      return {
-        title: zh ? '更新已就绪' : 'Update ready',
-        description: zh
-          ? `${version} 将在重启后生效。`
-          : `${version} will be applied on next launch.`
-      }
-    case 'up-to-date':
-      return {
-        title: zh ? '已是最新版本' : 'Up to date',
-        description: zh ? `当前 v${status.currentVersion}` : `Currently on v${status.currentVersion}`
-      }
-    case 'unsupported':
-      return {
-        title: zh ? '此版本不支持自动更新' : 'Automatic updates unavailable',
-        description: zh ? '请从官网下载新版本。' : 'Download new versions from the website.'
-      }
-    case 'error':
-      return {
-        title: zh ? '更新失败' : 'Update failed',
-        description: zh ? '无法检查或下载更新。' : 'Unable to check for or download updates.'
-      }
-    case 'idle':
-      return { title: '', description: '' }
+    case 'checking': return { title: t('checking'), description: t('currently', { version: status.currentVersion }) }
+    case 'available': return { title: t('available', { version }), description: t('readyDownload', { version }) }
+    case 'downloading': return { title: t('downloading'), description: `${version} · ${Math.round(status.percent ?? 0)}%` }
+    case 'downloaded': return { title: t('ready'), description: t('nextLaunch', { version }) }
+    case 'up-to-date': return { title: t('upToDate'), description: t('currently', { version: status.currentVersion }) }
+    case 'unsupported': return { title: t('unsupported'), description: t('website') }
+    case 'error': return { title: t('failed'), description: t('unable') }
+    case 'idle': return { title: '', description: '' }
   }
 }
 
 export function updateMessage(status: UpdateStatus, locale: UpdateLocale): string {
   const zh = locale === 'zh'
   const version = status.availableVersion ? ` ${status.availableVersion}` : ''
-
+  const percent = Math.round(status.percent ?? 0)
   if (status.downgrade && status.availableVersion) {
-    const percent = Math.round(status.percent ?? 0)
-    if (status.phase === 'downloading') {
-      return zh ? `正在降级到 ${status.availableVersion}（${percent}%）` : `Downgrading to ${status.availableVersion} (${percent}%)`
-    }
-    if (status.phase === 'downloaded') {
-      return zh
-        ? `降级包 ${status.availableVersion} 已就绪，重启后生效`
-        : `Downgrade ${status.availableVersion} is ready to install`
-    }
-    return zh ? `正在准备降级到 ${status.availableVersion}` : `Preparing to downgrade to ${status.availableVersion}`
+    const key = status.phase === 'downloaded' ? 'downgradeReady' : status.phase === 'downloading' ? 'downgrading' : 'preparingDowngrade'
+    return updateText(locale, key, { version: status.availableVersion }) + (status.phase === 'downloading' ? ` (${percent}%)` : '')
   }
-
   switch (status.phase) {
     case 'checking':
       return zh ? '正在检查更新…' : 'Checking for updates…'
@@ -193,5 +148,15 @@ export function rollbackReleases(releases: AvailableRelease[], currentVersion: s
 }
 
 export function rollbackEmptyMessage(locale: UpdateLocale): string {
-  return locale === 'zh' ? '暂无可回退的历史版本' : 'No older versions available to roll back to'
+  return updateText(locale, 'noOlder')
+}
+
+/** Known updater failures stay in the Desktop language instead of the English exception text. */
+export function presentedUpdateMessage(message: string | undefined, locale: UpdateLocale): string | undefined {
+  if (message === UPDATE_ACTION_FAILED) return updateText(locale, 'actionFailed')
+  if (message === 'Desktop update service is unavailable') return updateText(locale, 'serviceUnavailable')
+  if (message === 'Updates are available in installed macOS and Windows builds.' || message === 'Update checks are only available in installed macOS and Windows builds.') return updateText(locale, 'buildUnsupported')
+  if (message === 'Selected version is not in the release history' || message === '在更新源未找到该版本') return updateText(locale, 'versionsError')
+  if (message === 'Update archive does not match the selected version' || message === 'downloaded-version-mismatch' || message === 'downloaded-update-changed-during-install' || message === 'updater-not-initialized') return updateText(locale, 'actionFailed')
+  return message
 }

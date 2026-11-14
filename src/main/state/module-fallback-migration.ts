@@ -1,6 +1,6 @@
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { removeTree } from './remove-tree'
+import { removeTree } from '../profile/remove-tree'
 
 interface PackageManifest {
   name?: unknown

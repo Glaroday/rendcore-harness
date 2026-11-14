@@ -1,3 +1,5 @@
+import type { DesktopLocale } from '../shared/desktop-locale'
+import { updateText } from '../shared/desktop-update-messages'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -32,7 +34,7 @@ export function bundledHarnessVersion(appPath: string): string | undefined {
 export function aboutDetail(
   desktopVersion: string,
   harnessVersion: string | undefined,
-  locale: 'en' | 'zh'
+  locale: DesktopLocale
 ): string {
   const harness = harnessVersion ?? (locale === 'zh' ? '未知' : 'Unknown')
   if (locale === 'zh') {

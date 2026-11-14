@@ -89,6 +89,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(len(inputs), 1)
         self.assertEqual(inputs[0]['name'], 'rewrite_zh')
         self.assertEqual(inputs[0]['default_value'], '- 修复保存')
+        self.assertEqual(inputs[0]['width'], 'fill')
         self.assertNotIn('确认并发布', json.dumps(self.review.card(), ensure_ascii=False))
 
     def test_approve_publishes_without_translation(self):
@@ -124,6 +125,22 @@ class GateTests(unittest.TestCase):
             self.assertTrue(self.review.error)
         self.assertEqual(self.translations, [])
 
+    def test_invalid_draft_is_preserved_with_visible_actionable_error(self):
+        self.review.handle(self.event('rewrite'))
+        cases = [('修复保存', '减号和空格'), ('-修复保存', '减号和空格'),
+                 ('\n'.join(['- 修改'] * 13), '1–12'),
+                 ('- https://example.com', '不能包含链接'), ('', '请填写')]
+        for draft, hint in cases:
+            self.assertIsNone(self.review.handle(self.event('submit', draft)))
+            self.assertEqual(self.review.state, 'editing')
+            self.assertEqual(self.review.draft, draft)
+            self.assertIn(hint, self.review.error)
+            elements = self.review.card()['body']['elements']
+            form_index = next(i for i, item in enumerate(elements) if item['tag'] == 'form')
+            self.assertTrue(any('尚未发布' in item.get('content', '')
+                                for item in elements[:form_index]))
+        self.assertEqual(self.translations, [])
+
     def test_old_card_other_chat_and_missing_actor_do_not_release(self):
         for key, value in [('message_id', 'old-root'), ('chat_id', 'other-chat'), ('operator', ''), ('host', 'other')]:
             event = self.event('approve')
@@ -136,9 +153,21 @@ class GateTests(unittest.TestCase):
 
     def test_another_user_cannot_submit_or_cancel_active_edit(self):
         self.review.handle(self.event('rewrite'))
+        revision, draft = self.review.revision, self.review.draft
         for action in ['submit', 'cancel']:
             self.assertIsNone(self.review.handle(self.event(action, '- 修改', 'other-human')))
         self.assertEqual(self.review.state, 'editing')
+        self.assertEqual((self.review.revision, self.review.draft), (revision, draft))
+        self.assertEqual(self.translations, [])
+        for error in ['', '文案格式错误']:
+            self.review.error = error
+            text = json.dumps(self.review.card(), ensure_ascii=False)
+            self.assertIn('仅最初点击“重写”的人可以提交或取消', text)
+            self.assertIn('其他成员点击不会生效', text)
+        self.review.handle(self.event('cancel'))
+        self.assertEqual(self.review.state, 'preview')
+        self.review.handle(self.event('rewrite', operator='other-human'))
+        self.assertIsNotNone(self.review.handle(self.event('submit', '- 修改', 'other-human')))
 
     def test_optional_reviewer(self):
         self.review.reviewer = 'reviewer'
@@ -247,7 +276,8 @@ class GenerationTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/release.yml').read_text(encoding='utf-8')
         command = next(line for line in workflow.splitlines()
                        if 'copilot -p' in line and 'popup-notes.json' in line)
-        self.assertIn("--deny-tool '*'", command)
+        self.assertIn("--available-tools= --disable-builtin-mcps", command)
+        self.assertNotIn("--deny-tool", command)
 
 
 class TranslationTests(unittest.TestCase):
@@ -257,7 +287,7 @@ class TranslationTests(unittest.TestCase):
              patch.dict('os.environ', {'FEISHU_APP_SECRET': 'dummy', 'COPILOT_GITHUB_TOKEN': 'model-token'}):
             self.assertEqual(translate_chinese('- 修复 v1.2.3 保存'), {'zh': '- 修复 v1.2.3 保存', 'en': '- Fix v1.2.3 saving'})
         args, kwargs = run.call_args
-        self.assertEqual(args[0][-2:], ['--deny-tool', '*'])
+        self.assertEqual(args[0][-2:], ['--available-tools=', '--disable-builtin-mcps'])
         self.assertNotIn('FEISHU_APP_SECRET', kwargs['env'])
         self.assertEqual(kwargs['timeout'], 120)
 
