@@ -27,7 +27,6 @@ export const desktopMenuCommands = [
   'zoom-out',
   'toggle-fullscreen',
   'about',
-  'explore-enterprise',
   'quit'
 ] as const
 

@@ -1,3 +1,4 @@
+import { RENDCORE_UPSTREAM_IPC, type RendCoreUpstreamSnapshot } from '../shared/rendcore-upstreams'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type {
   DesktopShortcutInput,
@@ -68,6 +69,11 @@ if (appDocument) {
 
 const desktopBridge: {
   protocolVersion: number
+  rendcoreUpstreams?: {
+    read: () => Promise<RendCoreUpstreamSnapshot>
+    probe: () => Promise<RendCoreUpstreamSnapshot>
+    save: (preferred: string | null) => Promise<RendCoreUpstreamSnapshot>
+  }
   openMobilePairing?: () => Promise<void>
   getMobileStatus?: () => Promise<{ connected?: boolean }>
   onMobileStatus?: (listener: (status: { connected: boolean }) => void) => () => void
@@ -139,6 +145,11 @@ if (appDocument) {
   desktopBridge.acknowledgeRepairDraft = (sessionId, token) => ipcRenderer.invoke(DESKTOP_IPC.repairDraftAck, sessionId, token) as Promise<{ ok: boolean }>
 }
 if (appDocument && !isSafeModeRenderer(process.argv)) {
+  desktopBridge.rendcoreUpstreams = {
+    read: () => ipcRenderer.invoke(RENDCORE_UPSTREAM_IPC.read),
+    probe: () => ipcRenderer.invoke(RENDCORE_UPSTREAM_IPC.probe),
+    save: preferred => ipcRenderer.invoke(RENDCORE_UPSTREAM_IPC.save, preferred)
+  }
   desktopBridge.openMobilePairing = () => ipcRenderer.invoke(DESKTOP_IPC.mobileOpen) as Promise<void>
   desktopBridge.getMobileStatus = () => ipcRenderer.invoke(DESKTOP_IPC.mobileStatus) as Promise<{ connected?: boolean }>
   desktopBridge.onMobileStatus = listener => {

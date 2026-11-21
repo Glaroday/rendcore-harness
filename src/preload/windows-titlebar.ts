@@ -173,6 +173,7 @@ function syncTheme(document: Document, ipcRenderer: Pick<IpcRenderer, 'invoke'>)
 }
 
 export function documentIsDark(document: Document): boolean {
+  if (document.getElementById('dsh-desktop-boot-cover')) return true
   if (document.body.hasAttribute('data-ds-dark-theme')) return true
   const color = document.defaultView?.getComputedStyle(document.body).backgroundColor ?? ''
   const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number)

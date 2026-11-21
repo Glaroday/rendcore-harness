@@ -1,7 +1,9 @@
+import type { RendCoreUpstreamStatus } from '../../shared/rendcore-upstreams'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, request, type IncomingMessage, type ServerResponse } from 'node:http'
 
 export const RENDCORE_API_ENDPOINTS = [
+  'http://8.138.248.191:18036/v1',
   'http://47.103.24.134:18036/v1',
   'http://a.88frp.asia:8317/v1'
 ] as const
@@ -14,6 +16,8 @@ export interface RendCoreGateway {
 
 interface GatewayOptions {
   endpoints?: readonly string[]
+  preferredEndpoint?: () => string | undefined
+  onSelected?: (endpoint: string) => void
   probeTimeoutMs?: number
   healthTtlMs?: number
   log?: (line: string) => void
@@ -24,6 +28,21 @@ function modelList(value: unknown): boolean {
   return Array.isArray(value.data) && value.data.length > 0 && value.data.every(
     (row: unknown) => row !== null && typeof row === 'object' && 'id' in row && typeof row.id === 'string'
   )
+}
+
+export async function probeRendCoreEndpoint(endpoint: string, authorization: string | undefined, signal: AbortSignal): Promise<RendCoreUpstreamStatus> {
+  try {
+    const response = await fetch(`${endpoint}/models`, {
+      ...(authorization ? { headers: { Authorization: authorization } } : {}), redirect: 'error', signal
+    })
+    if (!response.ok) {
+      await response.body?.cancel()
+      return response.status === 401 || response.status === 403 ? 'auth-required' : 'unavailable'
+    }
+    return modelList(await response.json()) ? 'available' : 'unavailable'
+  } catch {
+    return 'unavailable'
+  }
 }
 
 function fail(response: ServerResponse, status: number, message: string): void {
@@ -41,56 +60,51 @@ export async function startRendCoreGateway(options: GatewayOptions = {}): Promis
   const prefix = `/rendcore-${randomBytes(24).toString('hex')}`
   const shutdown = new AbortController()
   const cooldown = new Map<string, number>()
-  let healthy: { endpoint: string; keyHash: string; until: number } | undefined
+  let healthy: { endpoint: string; lookup: string; until: number } | undefined
   let lastEndpoint: string | undefined
   const pending = new Map<string, Promise<string>>()
 
   async function discover(authorization: string): Promise<string> {
     const keyHash = createHash('sha256').update(authorization).digest('hex')
-    if (healthy?.keyHash === keyHash && healthy.until > Date.now()) return healthy.endpoint
-    const existing = pending.get(keyHash)
+    const preferred = options.preferredEndpoint?.()
+    const ordered = preferred !== undefined && endpoints.includes(preferred)
+      ? [preferred, ...endpoints.filter(endpoint => endpoint !== preferred)] : endpoints
+    const lookup = `${keyHash}:${ordered[0]}`
+    if (healthy?.lookup === lookup && healthy.until > Date.now()) return healthy.endpoint
+    const existing = pending.get(lookup)
     if (existing) return existing
     const probing = (async () => {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), options.probeTimeoutMs ?? 3_000)
       const signal = AbortSignal.any([controller.signal, shutdown.signal])
-      const authenticationFailures: string[] = []
-      const available = endpoints.filter(endpoint => (cooldown.get(endpoint) ?? 0) <= Date.now())
+      const available = ordered.filter(endpoint => (cooldown.get(endpoint) ?? 0) <= Date.now())
       try {
-        const endpoint = await Promise.any((available.length ? available : endpoints).map(async endpoint => {
-          const response = await fetch(`${endpoint}/models`, {
-            headers: { Authorization: authorization }, redirect: 'error', signal
-          })
-          if (response.status === 401 || response.status === 403) {
-            authenticationFailures.push(endpoint)
-            await response.body?.cancel()
-            throw new Error('authentication')
-          }
-          if (!response.ok) {
-            await response.body?.cancel()
-            throw new Error('unavailable')
-          }
-          if (!modelList(await response.json())) throw new Error('invalid model list')
-          return endpoint
-        }))
-        healthy = { endpoint, keyHash, until: Date.now() + (options.healthTtlMs ?? 15_000) }
+        // Probe concurrently but give the preferred upstream first choice.
+        const candidates = (available.length ? available : ordered).map(endpoint => ({ endpoint, status: probeRendCoreEndpoint(endpoint, authorization, signal) }))
+        let endpoint: string | undefined
+        let authenticationEndpoint: string | undefined
+        for (const candidate of candidates) {
+          const status = await candidate.status
+          if (status === 'available') { endpoint = candidate.endpoint; break }
+          if (status === 'auth-required') authenticationEndpoint ??= candidate.endpoint
+        }
+        if (endpoint === undefined) {
+          if (authenticationEndpoint !== undefined) return authenticationEndpoint
+          throw new Error('RendCore API endpoints are unavailable; retry shortly.')
+        }
+        healthy = { endpoint, lookup, until: Date.now() + (options.healthTtlMs ?? 15_000) }
         if (endpoint !== lastEndpoint) {
           options.log?.(`[desktop] RendCore API selected ${endpoint}`)
           lastEndpoint = endpoint
         }
         return endpoint
-      } catch {
-        // Forward the real authentication response rather than reporting a bad key as an outage.
-        const authenticationEndpoint = authenticationFailures[0]
-        if (authenticationEndpoint) return authenticationEndpoint
-        throw new Error('RendCore API endpoints are unavailable; retry shortly.')
       } finally {
         clearTimeout(timer)
         controller.abort()
       }
     })()
-    pending.set(keyHash, probing)
-    try { return await probing } finally { pending.delete(keyHash) }
+    pending.set(lookup, probing)
+    try { return await probing } finally { pending.delete(lookup) }
   }
 
   async function forward(incoming: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -109,6 +123,7 @@ export async function startRendCoreGateway(options: GatewayOptions = {}): Promis
       fail(response, 503, 'RendCore API endpoints are unavailable; retry shortly.'); return
     }
     if (shutdown.signal.aborted || response.destroyed) return
+    options.onSelected?.(endpoint)
     const headers: Record<string, string> = { Authorization: authorization }
     for (const name of ['content-type', 'content-length', 'accept', 'openai-beta', 'openai-organization', 'openai-project']) {
       const value = incoming.headers[name]

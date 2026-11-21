@@ -79,8 +79,8 @@ async function openMobilePairing(options: MobilePairingOptions): Promise<Browser
   secureWindow(window)
   window.show()
   window.focus()
-  // Start without awaiting before requesting HTML, so the first page already
-  // selects internet mode and renders download/tunnel progress (or its error).
+  // LAN pairing does not depend on internet tunnel startup.
+  // Keep the internet fallback for desktops with no local pairing address.
   if (options.reason !== 'reconnect' && shouldOpenInternetTunnel(snapshot)) {
     void options.bridge.toggleTunnel(true).catch((error: unknown) => {
       console.error('[mobile-pairing] Failed to enable internet pairing:', error)

@@ -39,6 +39,9 @@ import { usesDesktopCaption, type DesktopMenuCommand } from '../../shared/deskto
 import { parseWindowsMenuRequest, windowsMenuTemplate } from '../windows-menu'
 import { desktopWindowChrome, windowsChromeBackground, windowsTitleBarOverlay } from './window-chrome'
 import { buildWebImportViewModel } from '../web-import-view'
+import { RENDCORE_UPSTREAM_IPC } from '../../shared/rendcore-upstreams'
+import { classifyDesktopInstall } from '../profile/desktop-install-state'
+import { RendCoreUpstreamSettings } from '../runtime/rendcore-upstream-settings'
 import { RendCoreBackendHost } from '../runtime/rendcore-backend-host'
 import { DesktopBackendController } from './backend/backend-controller'
 import { DesktopBootSession, retainDesktopBoot } from './backend/boot-session'
@@ -46,7 +49,7 @@ import { DesktopHostFatalError, DesktopHostProcess } from './backend/host-proces
 import { continueAfterHostStartup, createHostFailureIntake } from './host-failure-intake'
 import { readDesktopLoginShellEnvironment, resolveDesktopLoginShellConfig } from './backend/login-shell-environment'
 import { attachDesktopStorage } from './desktop-storage-bridge'
-import { ENTERPRISE_URL, aboutUsesPage, buildDarwinDesktopMenu, buildWindowsApplicationMenu, externalUrlToOpen, insertFileMenu, shortcutFileMenuLabels } from './enterprise-menu'
+import { aboutUsesPage, buildDarwinDesktopMenu, buildWindowsApplicationMenu, externalUrlToOpen, insertFileMenu, shortcutFileMenuLabels } from './enterprise-menu'
 import { installDesktopShortcuts, type DesktopShortcutController } from './keyboard'
 import { installDesktopFileDrag } from './file-drag'
 import { runQuitSteps } from './quit-steps'
@@ -337,7 +340,9 @@ function createWindow(
     minHeight: 600,
     show: false,
     title: app.getName(),
-    ...desktopWindowChrome(process.platform, nativeTheme.shouldUseDarkColors),
+    // The first document is always the dark startup splash. Preload syncs
+    // the native caption with each subsequent document’s own theme.
+    ...desktopWindowChrome(process.platform, true),
     webPreferences: {
       preload,
       nodeIntegration: false,
@@ -548,6 +553,9 @@ async function main(): Promise<void> {
   let shortcuts: DesktopShortcutController | undefined
   const dshHome = harnessHome()
   const safeMode = process.env.DSH_DESKTOP_SAFE_MODE === '1' || shouldStartInSafeMode(process.argv)
+  if (!safeMode) classifyDesktopInstall({ userDataPath: app.getPath('userData'), appVersion: app.getVersion(), developmentBuild: !app.isPackaged })
+  const rendcoreUpstreams = new RendCoreUpstreamSettings(dshHome, loginShell.then(result => result.environment.RENDCORE_API_KEY, () => process.env.RENDCORE_API_KEY))
+  if (!safeMode) await rendcoreUpstreams.load()
   menuLocale = await savedDesktopMenuLocale(dshHome, safeMode, reportedLocale)
   const refreshApplicationMenu = (): void => {
     if (usesDesktopCaption(process.platform)) {
@@ -570,9 +578,6 @@ async function main(): Promise<void> {
     const template = insertFileMenu(buildDarwinDesktopMenu({
       locale: menuLocale,
       appName: app.name,
-      openEnterprise: () => {
-        void shell.openExternal(ENTERPRISE_URL).catch((error: unknown) => { console.error(error) })
-      },
       showAbout: () => {
         const target = desktopWindow
         if (target === undefined || target.isDestroyed()) return
@@ -889,7 +894,7 @@ async function main(): Promise<void> {
     }
   })
   backend = new DesktopBackendController(onFailure => new RendCoreBackendHost({
-    dshHome, profile: safeMode ? SAFE_MODE_PROFILE : 'desktop', productPatch, enableRendCore: !safeMode,
+    dshHome, profile: safeMode ? SAFE_MODE_PROFILE : 'desktop', productPatch, enableRendCore: !safeMode, upstreams: rendcoreUpstreams,
     log: line => { console.error(line) },
     createHost: effectivePatch => {
     const host = new DesktopHostProcess({
@@ -961,6 +966,11 @@ async function main(): Promise<void> {
       console.warn('[desktop-locale] unable to read language preference', error)
       return undefined
     })
+  }
+  if (!safeMode) {
+    ipcMain.handle(RENDCORE_UPSTREAM_IPC.read, event => { assertMain(event); return rendcoreUpstreams.snapshot() })
+    ipcMain.handle(RENDCORE_UPSTREAM_IPC.probe, event => { assertMain(event); return rendcoreUpstreams.probe() })
+    ipcMain.handle(RENDCORE_UPSTREAM_IPC.save, (event, value: unknown) => { assertMain(event); return rendcoreUpstreams.save(value) })
   }
   ipcMain.handle(DESKTOP_IPC.localeBootstrap, async event => {
     assertMain(event)
@@ -1299,9 +1309,6 @@ async function main(): Promise<void> {
         return
       case 'about':
         await presentAbout(owner, menuLocale)
-        return
-      case 'explore-enterprise':
-        await shell.openExternal(ENTERPRISE_URL)
         return
       case 'quit':
         app.quit()

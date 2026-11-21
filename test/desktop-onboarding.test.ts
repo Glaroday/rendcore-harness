@@ -176,7 +176,7 @@ function createCtx(overrides: Partial<CtxHarness> = {}): { ctx: CtxHarness; regi
   }
   const noopEffect = () => () => undefined
   const ctx: CtxHarness = {
-    inject: (deps, callback) => deps.every(dep => dep in ctx) ? callback(ctx) : undefined,
+    inject: (deps, callback) => deps.every(dep => dep in ctx || (dep === "remote.credentials" && ctx.remote.credentials !== undefined)) ? callback(ctx) : undefined,
     effect: noopEffect,
     locale: {
       register: () => undefined,
@@ -216,7 +216,7 @@ describe('DSH Desktop onboarding wizard', () => {
     expect(source).toContain('openSection(MODELS_SECTION_ID)')
     expect(source).not.toContain('OnboardingSurface')
     expect(source).not.toContain('ModelsSection')
-    expect(source).toContain('https://github.com/dataelement/dsh-desktop\'')
+    expect(source).toContain('https://github.com/Glaroday/rendcore-harness\'')
     expect(source).not.toContain('dsh-desktop/issues')
     expect(source).toContain('GITHUB_MARK_PATH')
     expect(source).toContain('IconGlobeOutlineRegular')
@@ -297,7 +297,7 @@ describe('DSH Desktop onboarding wizard', () => {
     const zh = dictsRecord.zh ?? {}
     const en = dictsRecord.en ?? {}
     expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort())
-    expect(zh.step0Title).toBe('内测声明')
+    expect(zh.step0Title).toBe('输入 RendCore API 密钥')
     expect(zh.configureModel).toBe('去配置模型')
     expect(en.configureModel).toBeTruthy()
     expect(en.later).toBeTruthy()

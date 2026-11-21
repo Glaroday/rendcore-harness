@@ -55,7 +55,10 @@ window.__ModuleLoader__.load({
     const en = {
       brandName: 'RendCore Harness',
       brandBy: 'by RendCore',
-      step0Title: 'Internal Testing Notice',
+      step0Title: 'Set up your RendCore API key',
+      keyLabel: 'RendCore API key',
+      keyHint: 'Enter your own key to use RendCore models. You can edit it later in Settings → Models → RendCore.',
+      saveKey: 'Save key',
       declarationBody: "RendCore Harness 0.1 remains in testing for Harness developers. Many areas need further improvement, and we welcome feedback from the developer community. RendCore Harness's core plugins and foundational APIs will continue to evolve rapidly over the coming months.\n\nWe look forward to exploring the limits of intelligence with developers around the world, building on open-source, open, reusable, and composable infrastructure. We welcome Harness developers everywhere to join the DSH plugin ecosystem.",
       desktopIntroTitle: 'About RendCore Harness',
       desktopIntroBody: 'RendCore Harness is maintained by the RendCore team as the desktop edition of RendCore Harness — local-first and cross-platform.',
@@ -64,13 +67,16 @@ window.__ModuleLoader__.load({
       desktopIntroFeedback: 'Found a bug or have a suggestion? Open an issue on GitHub, or reach us through the official site.',
       configureModel: 'Configure a model',
       later: 'Maybe later',
-      saveFailed: 'Could not save your acknowledgment. Please try again.'
+      saveFailed: 'Could not complete setup. Please try again.'
     }
 
     const zh = {
       brandName: 'RendCore Harness',
       brandBy: 'by RendCore',
-      step0Title: '内测声明',
+      step0Title: '输入 RendCore API 密钥',
+      keyLabel: 'RendCore API 密钥',
+      keyHint: '输入你自己的密钥以使用 RendCore 模型，之后可在「设置 → 模型 → RendCore」修改。',
+      saveKey: '保存密钥',
       declarationBody: 'RendCore Harness 目前的 0.1 版本仍处在面向 Harness 开发者进行测试的阶段，还有许多地方需要持续改进和打磨，希望听取广大开发者的反馈建议。预计 RendCore Harness 的核心插件以及基础 API 都会在接下来的一段时间内快速迭代、持续演化。\n\n我们期待与全球开发者一起，在开源、开放、可复用、可组合的基础设施之上，共同探索智能上限。欢迎全球 Harness 开发者加入 DSH 插件生态。',
       desktopIntroTitle: '关于 RendCore Harness',
       desktopIntroBody: 'RendCore Harness 是由 RendCore 团队维护的 RendCore Harness 桌面版本，为 Harness 提供本地优先、跨平台的桌面体验。',
@@ -158,6 +164,8 @@ window.__ModuleLoader__.load({
     function DesktopOnboardingNotice(props) {
       const { complete, openSection, t } = props
       const wizardScope = props.controller.scope
+      const credentials = props.controller.credentials
+      const [key, setKey] = useState('')
       const [decision, setDecision] = useState('loading')
       const [saving, setSaving] = useState(false)
       const [saveError, setSaveError] = useState(false)
@@ -167,12 +175,17 @@ window.__ModuleLoader__.load({
       // Persist the acknowledgement, then hand the onboarding slot back. The
       // optional follow-up runs after the slot is released (e.g. opening the
       // models settings section).
-      const finish = useCallback(async (followUp) => {
+      const finish = useCallback(async (followUp, credential) => {
         if (finishedRef.current) return
         finishedRef.current = true
         setSaving(true)
         setSaveError(false)
         try {
+          if (credential) {
+            const result = await credentials.set('RENDCORE_API_KEY', credential)
+            if (!result.ok) throw new Error('Key was not saved')
+            setKey('')
+          }
           const response = await fetch('/api/desktop-onboarding/acknowledge', { method: 'POST', credentials: 'same-origin', cache: 'no-store' })
           if (!response.ok || (await response.json()).acknowledged !== true) throw new Error('Acknowledgment was not saved')
           complete()
@@ -182,15 +195,22 @@ window.__ModuleLoader__.load({
           setSaving(false)
           setSaveError(true)
         }
-      }, [complete])
+      }, [complete, credentials])
 
       useEffect(() => {
+        let generation = 0
         const read = () => {
           const snap = wizardScope.getSnapshot()
           // Wait for the Host section so returning users never see a flash.
           if (snap.mode !== 'memory' && snap.status === 'loading') return
           const value = snap.value ?? {}
-          setDecision(onboardingDecision(value))
+          const next = onboardingDecision(value)
+          const ticket = ++generation
+          if (next !== 'show' || !credentials) { setDecision(next); return }
+          void credentials.describe(['RENDCORE_API_KEY']).then(result => {
+            if (ticket !== generation) return
+            setDecision(result.ok && result.value.RENDCORE_API_KEY?.configured ? 'complete' : 'show')
+          }).catch(() => { if (ticket === generation) setDecision('show') })
         }
         let unsubscribe
         try {
@@ -199,8 +219,8 @@ window.__ModuleLoader__.load({
         } catch {
           // Scope errors are non-fatal: a failing scope must not block boot.
         }
-        return () => { if (unsubscribe) unsubscribe() }
-      }, [wizardScope])
+        return () => { generation++; if (unsubscribe) unsubscribe() }
+      }, [wizardScope, credentials])
 
       // Ineligible installs and every prior acknowledgement skip straight on.
       useEffect(() => {
@@ -246,7 +266,14 @@ window.__ModuleLoader__.load({
             { ref: titleRef, className: 'dshDeskOnbHeading', tabIndex: -1 },
             t('step0Title')
           ),
-          React.createElement(NoticeBody, { t }),
+          React.createElement('p', { className: 'dshDeskOnbParagraph' }, t('keyHint')),
+          credentials && React.createElement('input', {
+            type: 'password', autoComplete: 'off', spellCheck: false, 'aria-label': t('keyLabel'),
+            placeholder: t('keyLabel'), value: key, disabled: saving, maxLength: 4096,
+            onChange: event => setKey(event.target.value), onKeyDown: event => {
+              if (event.key === 'Enter' && key.trim() && !saving) void finish(undefined, key.trim())
+            }
+          }),
           saveError ? React.createElement('p', { role: 'alert', className: 'dshDeskOnbHint' }, t('saveFailed')) : null,
           React.createElement(
             'div',
@@ -266,7 +293,10 @@ window.__ModuleLoader__.load({
                 })
               },
               t('configureModel')
-            )
+            ),
+            credentials && React.createElement(Button, {
+              variant: 'primary', disabled: saving || !key.trim(), onClick: () => finish(undefined, key.trim())
+            }, t('saveKey'))
           )
         )
       )
@@ -275,7 +305,7 @@ window.__ModuleLoader__.load({
     // ---------- composition ----------
 
     function apply(ctx) {
-      ctx.inject(['slots', 'locale', 'configForms'], (scope) => {
+      ctx.inject(['slots', 'locale', 'configForms', 'remote.credentials'], (scope) => {
         installStyles()
         const t = scope.locale.bind(NS)
 
@@ -283,7 +313,7 @@ window.__ModuleLoader__.load({
 
         scope.locale.register(NS, { zh, en })
 
-        const controller = { scope: wizardScope }
+        const controller = { scope: wizardScope, credentials: scope.remote?.credentials }
 
         // The stock welcome-notice / official-DeepSeek onboarding entries are
         // removed upstream by the settings-models patch (the desktop notice owns

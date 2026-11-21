@@ -1,28 +1,24 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { ENTERPRISE_URL, aboutMenuLabel, aboutUsesPage, buildDarwinDesktopMenu, buildWindowsApplicationMenu, enterpriseMenuLabel, externalUrlToOpen, insertFileMenu, safeModeMenuLabel, shortcutFileMenuLabels, standardMenuLabels, updateMenuLabel } from '../../src/main/shell/enterprise-menu'
+import { aboutMenuLabel, aboutUsesPage, buildDarwinDesktopMenu, buildWindowsApplicationMenu, externalUrlToOpen, insertFileMenu, safeModeMenuLabel, shortcutFileMenuLabels, standardMenuLabels, updateMenuLabel } from '../../src/main/shell/enterprise-menu'
 
-describe('enterprise entry', () => {
+describe('desktop menu', () => {
   it('uses the product enterprise page for both languages', () => {
-    expect(enterpriseMenuLabel('zh-CN')).toBe('了解企业版')
-    expect(enterpriseMenuLabel('en-US')).toBe('Explore Enterprise')
     expect(updateMenuLabel('zh-CN')).toBe('检查更新…')
     expect(updateMenuLabel('en-US')).toBe('Check for Updates…')
-    expect(aboutMenuLabel('zh-CN')).toBe('关于 DSH Desktop')
-    expect(aboutMenuLabel('en-US')).toBe('About DSH Desktop')
+    expect(aboutMenuLabel('zh-CN')).toBe('关于 RendCore Harness')
+    expect(aboutMenuLabel('en-US')).toBe('About RendCore Harness')
     expect(safeModeMenuLabel('zh-CN')).toBe('以安全模式重启…')
     expect(safeModeMenuLabel('en-US')).toBe('Restart as Safe Mode…')
     expect(aboutUsesPage('dsh-app://app/', 'dsh-app')).toBe(true)
     expect(aboutUsesPage('dsh-app://app/index.html', 'dsh-app')).toBe(true)
     expect(aboutUsesPage('file:///tmp/splash.html', 'dsh-app')).toBe(false)
-    expect(externalUrlToOpen(ENTERPRISE_URL)).toBe(ENTERPRISE_URL)
     expect(externalUrlToOpen('javascript:alert(1)')).toBeUndefined()
     expect(externalUrlToOpen('not a url')).toBeUndefined()
   })
 
-  it.each(['zh-CN', 'en-US'])('orders about, updates, then enterprise in the %s app menu', locale => {
-    const openEnterprise = vi.fn()
+  it.each(['zh-CN', 'en-US'])('orders about, updates, then restart in the %s app menu', locale => {
     const showAbout = vi.fn()
     const checkForUpdates = vi.fn()
     const restart = vi.fn()
@@ -35,7 +31,6 @@ describe('enterprise entry', () => {
     const menu = buildDarwinDesktopMenu({
       locale,
       appName: 'DSH Desktop Shell',
-      openEnterprise,
       showAbout,
       checkForUpdates,
       restart,
@@ -47,30 +42,28 @@ describe('enterprise entry', () => {
       quit
     })
     const submenu = menu[0]?.submenu ?? []
-    expect(submenu[0]?.label).toBe(locale.startsWith('zh') ? '关于 DSH Desktop' : 'About DSH Desktop')
+    expect(submenu[0]?.label).toBe(locale.startsWith('zh') ? '关于 RendCore Harness' : 'About RendCore Harness')
     expect(submenu[1]?.label).toBe(locale.startsWith('zh') ? '检查更新…' : 'Check for Updates…')
     expect(submenu[1]?.accelerator).toBe('CmdOrCtrl+U')
-    expect(submenu[2]?.label).toBe(locale.startsWith('zh') ? '了解企业版' : 'Explore Enterprise')
-    expect(submenu[3]?.label).toBe(locale.startsWith('zh') ? '重启' : 'Restart')
-    expect(submenu[3]?.accelerator).toBe('CmdOrCtrl+Shift+R')
-    expect(submenu[4]?.label).toBe(locale.startsWith('zh') ? '以安全模式重启…' : 'Restart as Safe Mode…')
-    expect(submenu[5]?.label).toBe(locale.startsWith('zh') ? '显示 Harness 日志' : 'Show Harness Log')
+    expect(submenu.some(item => /企业版|Enterprise/.test(item.label ?? ''))).toBe(false)
+    expect(submenu[2]?.label).toBe(locale.startsWith('zh') ? '重启' : 'Restart')
+    expect(submenu[2]?.accelerator).toBe('CmdOrCtrl+Shift+R')
+    expect(submenu[3]?.label).toBe(locale.startsWith('zh') ? '以安全模式重启…' : 'Restart as Safe Mode…')
+    expect(submenu[4]?.label).toBe(locale.startsWith('zh') ? '显示 Harness 日志' : 'Show Harness Log')
     submenu[0]?.click?.()
     submenu[1]?.click?.()
     submenu[2]?.click?.()
     submenu[3]?.click?.()
     submenu[4]?.click?.()
-    submenu[5]?.click?.()
     expect(showAbout).toHaveBeenCalledOnce()
     expect(checkForUpdates).toHaveBeenCalledOnce()
-    expect(openEnterprise).toHaveBeenCalledOnce()
     expect(restart).toHaveBeenCalledOnce()
     expect(restartSafeMode).toHaveBeenCalledOnce()
     expect(showHarnessLog).toHaveBeenCalledOnce()
+    submenu[6]?.click?.()
     submenu[7]?.click?.()
     submenu[8]?.click?.()
-    submenu[9]?.click?.()
-    submenu[11]?.click?.()
+    submenu[10]?.click?.()
     expect(hide).toHaveBeenCalledOnce()
     expect(hideOthers).toHaveBeenCalledOnce()
     expect(unhideAll).toHaveBeenCalledOnce()
@@ -84,7 +77,6 @@ describe('enterprise entry', () => {
     const withoutSafeMode = buildDarwinDesktopMenu({
       locale,
       appName: 'DSH Desktop Shell',
-      openEnterprise,
       showAbout,
       checkForUpdates,
       restart,
@@ -96,17 +88,17 @@ describe('enterprise entry', () => {
     })
     const safeModeOmitted = withoutSafeMode[0]?.submenu ?? []
     expect(safeModeOmitted.some(item => item.label === safeModeMenuLabel(locale))).toBe(false)
-    expect(safeModeOmitted[3]?.label).toBe(locale.startsWith('zh') ? '重启' : 'Restart')
-    expect(safeModeOmitted[4]?.label).toBe(locale.startsWith('zh') ? '显示 Harness 日志' : 'Show Harness Log')
+    expect(safeModeOmitted[2]?.label).toBe(locale.startsWith('zh') ? '重启' : 'Restart')
+    expect(safeModeOmitted[3]?.label).toBe(locale.startsWith('zh') ? '显示 Harness 日志' : 'Show Harness Log')
   })
 
   it('places the file menu after the application menu', () => {
     const labels = shortcutFileMenuLabels('zh-CN')
     const menu = insertFileMenu([
-      { label: 'DSH Desktop Shell', submenu: [{ label: '关于 DSH Desktop' }] },
+      { label: 'DSH Desktop Shell', submenu: [{ label: '关于 RendCore Harness' }] },
       { label: 'Edit' }
     ], { label: labels.fileMenu, submenu: [{ label: labels.closePage }] })
-    expect(menu[0]?.submenu?.[0]?.label).toBe('关于 DSH Desktop')
+    expect(menu[0]?.submenu?.[0]?.label).toBe('关于 RendCore Harness')
     expect(menu[1]?.label).toBe('文件')
     expect(menu[1]?.submenu?.[0]?.label).toBe('关闭页面或窗口')
     expect(menu[2]?.label).toBe('Edit')
@@ -150,7 +142,6 @@ describe('enterprise entry', () => {
     expect(source.includes('locale: menuLocale')).toBe(true)
     expect(source.includes('savedDesktopMenuLocale(')).toBe(true)
     expect(source.includes('menuLocale = resolved')).toBe(true)
-    expect(source.includes('ENTERPRISE_URL')).toBe(true)
     expect(source.includes('externalUrlToOpen(')).toBe(true)
     expect(source.includes('registerUpdateHandlers(')).toBe(true)
     expect(source.includes('startUpdateManager(')).toBe(true)
@@ -165,7 +156,7 @@ describe('enterprise entry', () => {
     expect(source.includes('restartInSafeMode()')).toBe(true)
     expect(source.includes('shouldStartInSafeMode(process.argv)')).toBe(true)
     expect(source.includes('bundledHarnessVersion(')).toBe(true)
-    expect(source.includes("app.setPath('userData', join(app.getPath('appData'), 'dsh-desktop'))")).toBe(true)
+    expect(source.includes("app.setPath('userData', join(app.getPath('appData'), 'rendcore-harness'))")).toBe(true)
     expect(source.includes('configureDesktopIdentity()')).toBe(true)
     expect(source.includes('mandatory-update')).toBe(false)
     expect(source.includes('autoDownload = true')).toBe(false)

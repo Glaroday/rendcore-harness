@@ -105,7 +105,6 @@ export function windowsMenuTemplate(
     { type: 'separator' },
     command('check-for-updates', text.update, 'Ctrl+U'),
     command('about', text.about),
-    command('explore-enterprise', text.enterprise),
     { type: 'separator' },
     command('quit', text.exit)
   ]

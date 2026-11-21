@@ -8,9 +8,8 @@ export const BOOT_COVER_STALL_MS = 20_000
 /** Same files splash.html loads, served by the desktop protocol so the Harness origin can paint them. */
 export const BOOT_COVER_MARK_URL = 'dsh-desktop://desktop/startup-whale.gif'
 
-// The supplied GIF has an opaque background and an embedded caption. Match
-// splash.html in both themes rather than recoloring or duplicating that caption.
-const BACKGROUND = '#fbfbfb'
+// Keep both startup surfaces gray-black, independently of the main UI theme.
+const BACKGROUND = '#141416'
 const MARK_WIDTH_PX = 280
 const MARK_ASPECT_RATIO = '480 / 276'
 
@@ -89,7 +88,7 @@ export function mountBootCover(href: string, options: BootCoverOptions): BootCov
   // Hide the whole boot tree, then explicitly paint the cover which lives
   // outside body so Harness cannot replace it with the failure screen.
   pageStyle.textContent = `
-    html { background: ${BACKGROUND} !important; }
+    html { color-scheme: dark; background: ${BACKGROUND} !important; }
     body, body * { visibility: hidden !important; }
     #${BOOT_COVER_ID}, #${BOOT_COVER_ID} * { visibility: visible !important; }
   `
@@ -102,7 +101,7 @@ export function mountBootCover(href: string, options: BootCoverOptions): BootCov
     'inset:0',
     'z-index:2147483646',
     `background:${BACKGROUND}`,
-    'color:#17181a'
+    'color:#f3f4f6'
   ].join(';')
   const shadow = cover.attachShadow({ mode: 'open' })
   // Matches build/splash.html. The outer visibility rule cannot enter this
@@ -137,7 +136,7 @@ export function mountBootCover(href: string, options: BootCoverOptions): BootCov
       overflow:visible; clip-path:none;
     }
     h1 { margin:0; font-size:23px; font-weight:650; letter-spacing:-0.02em; }
-    p { margin:-4px 0 0; color:#777a80; font-size:13px; }
+    p { margin:-4px 0 0; color:#9ca0a8; font-size:13px; }
   `
   const panel = doc.createElement('div')
   panel.className = 'panel'

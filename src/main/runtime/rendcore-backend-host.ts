@@ -2,6 +2,8 @@ import { migrateRendCoreEndpoints } from './rendcore-endpoint-migration'
 import { prepareRendCoreModelCatalog } from './rendcore-model-catalog'
 import { startRendCoreGateway, type RendCoreGateway } from './rendcore-gateway'
 
+import type { RendCoreUpstreamSettings } from './rendcore-upstream-settings'
+
 interface BackendHost {
   start(): Promise<unknown>
   stop(): Promise<void>
@@ -20,6 +22,7 @@ export class RendCoreBackendHost implements BackendHost {
     profile: string
     productPatch: string
     enableRendCore?: boolean
+    upstreams?: RendCoreUpstreamSettings
     log: (line: string) => void
     createHost: (patch: string) => BackendHost
   }) {}
@@ -50,7 +53,11 @@ export class RendCoreBackendHost implements BackendHost {
     const { dshHome, profile, productPatch, enableRendCore = true, log } = this.options
     if (!enableRendCore) return productPatch
     await migrateRendCoreEndpoints(dshHome, profile)
-    this.gateway = await startRendCoreGateway({ log })
+    this.gateway = await startRendCoreGateway({
+      log,
+      preferredEndpoint: () => this.options.upstreams?.preferredEndpoint,
+      onSelected: endpoint => this.options.upstreams?.recordSelected(endpoint)
+    })
     const catalog = await prepareRendCoreModelCatalog(productPatch, dshHome, log, this.gateway.baseURL)
     return catalog.path
   }

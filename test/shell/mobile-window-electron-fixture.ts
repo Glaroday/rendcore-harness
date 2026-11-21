@@ -86,8 +86,13 @@ async function acceptSuccessAndReuse(): Promise<void> {
   const [window, duplicate] = await Promise.all([firstOpening, secondOpening])
   assert.equal(window, duplicate, 'Concurrent opens must share a real BrowserWindow')
   assert.equal(BrowserWindow.getAllWindows().length, 1)
-  assert.equal(cloudflareCalls, 1)
+  if (bridge.snapshot().pairingUrl && !bridge.snapshot().tunnelLoading) {
+    await pageIs(window, `${lan} && !(${loading}) && document.getElementById("qrCode").querySelector("svg")`)
+    assert.equal(cloudflareCalls, 0, 'Wi-Fi QR must work before starting any internet tunnel')
+    await window.webContents.executeJavaScript('document.getElementById("btnTunnel").click()')
+  }
   await pageIs(window, `${internet} && ${loading} && document.getElementById("urlRow").hidden`)
+  await pageIs(window, `Number(document.getElementById("tunnelProgressValue").textContent.replace("%", "")) > 0`)
   assert.equal(bridge.snapshot().tunnelLoading, true)
   console.log('PASS manual-loading')
 
@@ -139,6 +144,9 @@ async function acceptFailure(): Promise<void> {
   })
   bridges.push(bridge)
   const window = await open(bridge)
+  if (bridge.snapshot().pairingUrl && !bridge.snapshot().tunnelLoading) {
+    await window.webContents.executeJavaScript('document.getElementById("btnTunnel").click()')
+  }
   await pageIs(window, `${internet} && ${loading}`)
   pending.release()
   await pageIs(window, `${internet} && !(${loading}) && document.getElementById("tunnelError").classList.contains("show") && document.getElementById("tunnelError").textContent.includes("local-cloudflare-failure") && document.getElementById("tunnelError").textContent.includes("local-pinggy-failure") && !document.getElementById("retryTunnel").hidden && document.getElementById("urlRow").hidden`)

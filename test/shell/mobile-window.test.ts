@@ -59,8 +59,9 @@ describe('formal shell mobile window', () => {
     value.toggleTunnel.mockImplementation(async () => { native.events.push('tunnel'); await tunnel.promise; return await value.start() })
     const window = await presentMobilePairing(options(value))
     expect(window).toBe(native.windows[0])
-    expect(native.events).toEqual(['show', 'tunnel', 'load'])
-    expect(value.toggleTunnel).toHaveBeenCalledWith(true)
+    expect(native.events).toEqual(hasLan ? ['show', 'load'] : ['show', 'tunnel', 'load'])
+    if (hasLan) expect(value.toggleTunnel).not.toHaveBeenCalled()
+    else expect(value.toggleTunnel).toHaveBeenCalledWith(true)
     const { BrowserWindow } = await import('electron')
     expect(BrowserWindow).toHaveBeenCalledWith(expect.objectContaining({ width: 500, height: 640, minWidth: 380, minHeight: 540,
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } }))
@@ -110,7 +111,7 @@ describe('formal shell mobile window', () => {
     expect(await first).toBe(await second)
     expect(native.windows).toHaveLength(1)
     expect(value.createDesktopUrl).toHaveBeenCalledOnce()
-    expect(value.toggleTunnel).toHaveBeenCalledOnce()
+    expect(value.toggleTunnel).not.toHaveBeenCalled()
   })
 
   it('does not show a window again after it was closed during load', async () => {
@@ -130,7 +131,7 @@ describe('formal shell mobile window', () => {
   })
 
   it('handles unexpected tunnel rejection without losing the window', async () => {
-    const value = bridge()
+    const value = bridge({ desktopUrl: 'http://127.0.0.1/desktop' })
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     value.toggleTunnel.mockRejectedValue(new Error('tunnel failed'))
     const window = await presentMobilePairing(options(value))

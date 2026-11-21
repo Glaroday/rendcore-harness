@@ -101,6 +101,7 @@ describe('boot cover lifecycle', () => {
       locale: 'en'
     })
     expect(first).not.toBeNull()
+    expect(harness.doc.getElementById(BOOT_COVER_ID)?.style.background).toBe('rgb(20, 20, 22)')
     expect(harness.doc.querySelectorAll(`#${BOOT_COVER_ID}`)).toHaveLength(1)
     expect(repeat).toBe(harness.cover)
     const shadow = first?.shadowRoot
@@ -158,7 +159,7 @@ describe('boot cover lifecycle', () => {
     const { doc, cover } = mountHarnessCover()
     const root = doc.getElementById(BOOT_COVER_ID)
     const css = root?.shadowRoot?.querySelector('style')?.textContent ?? ''
-    expect(root?.style.background).toBe('rgb(251, 251, 251)')
+    expect(root?.style.background).toBe('rgb(20, 20, 22)')
     expect(css).toContain('aspect-ratio:480 / 276')
     expect(css).toContain('width:min(280px, 100%)')
     expect(css).toContain('translateY(-80px)')

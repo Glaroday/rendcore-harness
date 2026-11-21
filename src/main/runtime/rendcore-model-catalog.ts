@@ -283,7 +283,7 @@ async function repairDefaultModel(dshHome: string, available: Set<string>): Prom
   await writeManagedText(settingsPath, stringify(settings))
 }
 
-async function readStoredApiKey(dshHome: string): Promise<string | undefined> {
+export async function readStoredApiKey(dshHome: string): Promise<string | undefined> {
   try {
     const credentials = parse(await readFile(join(dshHome, '.credentials.yaml'), 'utf8')) as unknown
     const root = objectValue(credentials)

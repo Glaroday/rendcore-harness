@@ -57,13 +57,26 @@ describe('RendCore automatic API routing', () => {
     expect(logs.join()).not.toContain('fixture-not-a-real-key')
   })
 
-  it('does not wait for the dead candidate timeout when another candidate responds', async () => {
+  it('uses the backup after the shared probe deadline', async () => {
     const stalled = await upstream(() => {})
     const live = await upstream((_req, res) => res.end(models))
-    const bridge = await startRendCoreGateway({ endpoints: [stalled, live], probeTimeoutMs: 5_000 })
+    const bridge = await startRendCoreGateway({ endpoints: [stalled, live], probeTimeoutMs: 400 })
     cleanup.push(() => bridge.close())
     const response = await fetch(`${bridge.baseURL}/models`, { headers: auth, signal: AbortSignal.timeout(1_500) })
     expect(await response.json()).toEqual(JSON.parse(models))
+  })
+
+  it('prefers the primary even if a backup is faster, and applies a new preference without a restart', async () => {
+    const primary = await upstream((_req, res) => { setTimeout(() => res.end(models), 30) })
+    const backup = await upstream((_req, res) => res.end(models))
+    let preferred: string | undefined
+    const selected: string[] = []
+    const bridge = await startRendCoreGateway({ endpoints: [primary, backup], preferredEndpoint: () => preferred, onSelected: endpoint => selected.push(endpoint) })
+    cleanup.push(() => bridge.close())
+    await (await fetch(`${bridge.baseURL}/models`, { headers: auth })).text()
+    preferred = backup
+    await (await fetch(`${bridge.baseURL}/models`, { headers: auth })).text()
+    expect(selected).toEqual([primary, backup])
   })
 
   it('does not choose an authentication failure over a key accepted by the other endpoint', async () => {

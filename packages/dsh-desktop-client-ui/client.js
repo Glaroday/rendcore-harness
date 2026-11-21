@@ -219,14 +219,6 @@ window.__ModuleLoader__.load({
       }
     }
 
-    const ENTERPRISE_NS = 'dsh-desktop-enterprise-entry'
-    function EnterpriseEntry({ t }) {
-      return React.createElement('a', {
-        href: 'https://dshdesktop.com/zh/enterprise/', target: '_blank', rel: 'noopener noreferrer',
-        'data-dsh-enterprise-entry': true
-      }, t('learnMore'), React.createElement('span', { 'aria-hidden': true }, ' ↗'))
-    }
-
     const REPAIR_NS = 'dsh-desktop-repair'
     function DesktopUtilityActions({ t, wide }) {
       const [busy, setBusy] = React.useState(false)
@@ -326,23 +318,78 @@ window.__ModuleLoader__.load({
       if (typeof bridge?.openRepairAgent === 'function' || typeof bridge?.openMobilePairing === 'function') ctx.slots.inject('sidebar.settings.action', () => ctx.slots.register({ name: 'sidebar.settings.action', id: 'desktop-utilities', locale: REPAIR_NS, inject: () => ({ t: ctx.locale.bind(REPAIR_NS) }) }, DesktopUtilityActions))
     }
 
+    const UPSTREAM_NS = 'dsh-desktop-rendcore-upstreams'
+    const upstreamMessages = {
+      zh: { title: 'RendCore 上游线路', automatic: '自动（主线路优先）', preference: '首选线路', main: '主线路', backup: '备用线路', current: '最近使用', refresh: '检测线路', close: '关闭', pending: '正在检测或保存…', unknown: '未检测', available: '可用', 'auth-required': '可达，密钥未验证或被拒绝', unavailable: '不可用', error: '操作未完成，请重试。', hint: '首选线路不可用时自动改用备用线路。检测仅检查模型列表。' },
+      en: { title: 'RendCore upstreams', automatic: 'Automatic (primary first)', preference: 'Preferred upstream', main: 'Primary', backup: 'Backup', current: 'Last used', refresh: 'Check upstreams', close: 'Close', pending: 'Checking or saving…', unknown: 'Not checked', available: 'Available', 'auth-required': 'Reachable; key unverified or rejected', unavailable: 'Unavailable', error: 'The operation did not complete. Try again.', hint: 'Backups are used if the preferred upstream is unavailable. This check only tests the model list.' }
+    }
+
+    function RendCoreUpstreamsEntry({ t }) {
+      const bridge = window.dshDesktop?.rendcoreUpstreams
+      const [open, setOpen] = React.useState(false)
+      const [state, setState] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const [error, setError] = React.useState(false)
+      const generation = React.useRef(0)
+      React.useEffect(() => () => { generation.current++ }, [])
+      if (!bridge) return null
+      const { Modal, Button } = require('@deepseek-ai/dsh-client-ui-primitives')
+      const run = async (operation) => {
+        const ticket = ++generation.current
+        setBusy(true); setError(false)
+        try {
+          const result = await operation()
+          if (ticket === generation.current) setState(result)
+        } catch {
+          if (ticket === generation.current) setError(true)
+        } finally {
+          if (ticket === generation.current) setBusy(false)
+        }
+      }
+      const h = React.createElement
+      const close = () => { if (!busy) setOpen(false) }
+      return h(React.Fragment, null,
+        h(Button, { variant: 'outline', onClick: () => {
+          setOpen(true)
+          void run(async () => {
+            setState(await bridge.read())
+            return bridge.probe()
+          })
+        } }, t('title')),
+        open && h(Modal, { open, title: t('title'), onClose: close },
+          h('p', null, t('hint')),
+          state && h('label', null, t('preference'), ' ',
+            h('select', { value: state.preferred ?? '', disabled: busy, onChange: event => {
+              const preference = event.target.value || null
+              void run(async () => {
+                const saved = await bridge.save(preference)
+                return { ...saved, endpoints: state.endpoints }
+              })
+            } },
+            h('option', { value: '' }, t('automatic')),
+            ...state.endpoints.map(({ url }, index) => h('option', { key: url, value: url }, `${t(index === 0 ? 'main' : 'backup')} — ${url}`)))),
+          state && h('ul', { style: { overflowWrap: 'anywhere', paddingInlineStart: 20 } }, ...state.endpoints.map(({ url, status }) =>
+            h('li', { key: url }, `${url} — ${t(status ?? 'unknown')}${state.selected === url ? ` · ${t('current')}` : ''}`))),
+          busy && h('p', { role: 'status' }, t('pending')),
+          error && h('p', { role: 'alert' }, t('error')),
+          h('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end' } },
+            h(Button, { variant: 'outline', disabled: busy, onClick: () => run(() => bridge.probe()) }, t('refresh')),
+            h(Button, { variant: 'primary', disabled: busy, onClick: close }, t('close')))))
+    }
+
     const inject = ['locale', 'slots', 'remote.session', 'sessions', 'uiWorkspace']
     function apply(ctx) {
       installStyles()
       applyRepair(ctx)
       ctx.effect(() => ctx.locale.register(ACTIONS_NS, actionMessages))
       const actionText = ctx.locale.bind(ACTIONS_NS)
-      ctx.effect(() => ctx.locale.register(ENTERPRISE_NS, {
-        zh: { learnMore: '了解企业版' }, en: { learnMore: 'Explore Enterprise' },
-        ja: { learnMore: 'エンタープライズ版について' }, es: { learnMore: 'Conocer la edición empresarial' },
-        fr: { learnMore: 'Découvrir la version entreprise' }, de: { learnMore: 'Enterprise-Version entdecken' },
-        ru: { learnMore: 'Корпоративная версия' }, pt: { learnMore: 'Conhecer a versão empresarial' }
-      }))
-      const enterpriseText = ctx.locale.bind(ENTERPRISE_NS)
-      ctx.slots.inject('settings.sidebar.footer', () => ctx.slots.register({
-        name: 'settings.sidebar.footer', id: 'desktop-enterprise-entry', locale: ENTERPRISE_NS,
-        inject: () => ({ t: enterpriseText })
-      }, EnterpriseEntry))
+      if (window.dshDesktop?.rendcoreUpstreams) {
+        ctx.effect(() => ctx.locale.register(UPSTREAM_NS, upstreamMessages))
+        ctx.slots.inject('settings.sidebar.footer', () => ctx.slots.register({
+          name: 'settings.sidebar.footer', id: 'rendcore-upstreams', locale: UPSTREAM_NS,
+          inject: () => ({ t: ctx.locale.bind(UPSTREAM_NS) })
+        }, RendCoreUpstreamsEntry))
+      }
 
       ctx.effect(() => {
         const id = 'dsh-desktop-preset-toolbar-style'
@@ -358,13 +405,6 @@ window.__ModuleLoader__.load({
           [data-dsh-market-nav-icon] svg,
           [data-dsh-better-sidebar-settings-nav] span[class*="navIcon"],
           [data-dsh-better-sidebar-settings-nav] svg { display:none !important; }
-          [data-dsh-enterprise-entry] {
-            display:flex; align-items:center; gap:4px; min-height:36px; padding:0 12px;
-            border-radius:8px; color:var(--dsw-alias-label-secondary); font-size:13px;
-            line-height:20px; text-decoration:none;
-          }
-          [data-dsh-enterprise-entry]:hover { color:var(--dsw-alias-label-primary); background:var(--dsw-alias-interactive-bg-hover); }
-          [data-dsh-enterprise-entry]:focus-visible { outline:2px solid var(--dsw-alias-state-business-primary); outline-offset:1px; }
           :root { --dsh-page-title-top-spacing:56px; }
           /* Keep Desktop actions beside Settings, without relocating other slot contributions. */
           [data-dsh-sidebar-settings]:has([data-dsh-desktop-utilities]) {
@@ -374,20 +414,20 @@ window.__ModuleLoader__.load({
             flex:1; min-width:0;
           }
           [data-dsh-sidebar-settings]:has([data-dsh-desktop-utilities]) > [data-dsh-sidebar-settings-actions] {
-            flex:none;
+            display:flex; flex:none; flex-wrap:nowrap; align-items:center; gap:2px;
           }
           [data-dsh-sidebar-settings]:has([data-dsh-desktop-utilities][data-wide="false"]) {
             flex-direction:column;
           }
           /* Utilities own their button layout; leave other contributions unconstrained. */
           [data-dsh-desktop-utilities] {
-            display:flex; align-items:center; flex-wrap:wrap; gap:4px; padding:4px;
+            position:relative; display:flex; align-items:center; flex-wrap:nowrap; gap:2px; padding:0;
           }
           [data-dsh-desktop-utilities][data-wide="false"] { justify-content:center; }
           [data-dsh-desktop-utilities] button {
             box-sizing:border-box; appearance:none; -webkit-appearance:none;
             display:inline-flex; align-items:center; justify-content:center; flex:none;
-            width:32px; height:32px; padding:0; border:0; border-radius:8px;
+            width:28px; height:30px; padding:0; border:0; border-radius:8px;
             background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; cursor:pointer;
           }
           [data-dsh-desktop-utilities] button:hover:not(:disabled) {
@@ -398,7 +438,7 @@ window.__ModuleLoader__.load({
           }
           [data-dsh-desktop-utilities] button:disabled { opacity:.5; cursor:wait; }
           [data-dsh-desktop-utilities] [role=alert] {
-            flex-basis:100%; min-width:0; overflow-wrap:anywhere; font-size:12px;
+            position:absolute; right:0; bottom:100%; width:150px; overflow-wrap:anywhere; font-size:12px; background:var(--dsw-alias-bg-layer-1); z-index:1;
             color:var(--dsw-alias-label-primary);
           }
           /* Top-level page titles align with the sidebar brand row. Keep
