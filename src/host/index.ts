@@ -2,14 +2,14 @@ import { randomUUID } from 'node:crypto'
 import type { PluginOperationRunId } from '@deepseek-ai/dsh-plugin-manager/diagnostic'
 import { localDragResource } from './file-drag'
 import { installOperationDiagnostics } from './operation-diagnostics'
-import { pluginOperationHost } from './upstream-api'
+import { enabledPluginIds, pluginOperationHost, runHostProfile } from './upstream-api'
 import { delimiter, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerOfficeEngineResolution } from '../../build/office-engine-resolution.mjs'
+import { HIDE_CONSOLE_BOOTSTRAP_ENV } from 'dsh-desktop-market-installer/windows-hide-console'
 import { inspect, isDeepStrictEqual } from 'node:util'
 import { StartupError, loadLayeredEnv, loadOverlayPatches, loadProfileDirectory, readProfilePatches, reconcileProfilePatches, reportSkippedBundles, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
-import { runProfile } from '@deepseek-ai/dsh/profile-boot'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
@@ -17,6 +17,21 @@ const MAX_FATAL_DIAGNOSTIC_CHARS = 64 * 1024
 const MAX_ORIGINAL_ERROR_CHARS = 8 * 1024
 const MAX_STARTUP_ENTRY_CHARS = 8 * 1024
 const PROFILE_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/u
+
+export function packageManagerEnvironment(
+  environment: NodeJS.ProcessEnv,
+  executable: string,
+  nodeBin: string
+): Readonly<Record<string, string>> {
+  return {
+    ELECTRON_RUN_AS_NODE: '1',
+    DSH_DESKTOP_NODE_EXECUTABLE: executable,
+    PATH: `${nodeBin}${delimiter}${environment.PATH ?? ''}`,
+    ...(environment[HIDE_CONSOLE_BOOTSTRAP_ENV] === undefined
+      ? {}
+      : { [HIDE_CONSOLE_BOOTSTRAP_ENV]: environment[HIDE_CONSOLE_BOOTSTRAP_ENV] })
+  }
+}
 
 async function main(): Promise<void> {
   // The diagnostic contract brands this startup UUID; randomUUID already returns that shape.
@@ -27,6 +42,10 @@ async function main(): Promise<void> {
   if (runtimeDir === undefined || projectDir === undefined) {
     throw new Error('dsh desktop host: runtime and project directories are required')
   }
+  // argv[4] is the desktop primary runtime. The default composition reads
+  // DSH_PRIMARY_RUNTIME while the profile is evaluated; setting it later leaves
+  // the bundled Python disabled.
+  process.env.DSH_PRIMARY_RUNTIME = process.argv[4] || join(runtimeDir, '..', 'runtime', 'primary-runtime')
   // The packaged engine is spawned by the OS, so it has to resolve under
   // app.asar.unpacked. This path only supplies the archive depth; bin.js is
   // not executed. Outside a package the registration does nothing.
@@ -37,20 +56,15 @@ async function main(): Promise<void> {
   const packageManager = process.argv[5] === undefined ? undefined : {
     command: process.execPath,
     args: ['--expose-internals', process.argv[5]],
-    env: {
-      ELECTRON_RUN_AS_NODE: '1',
-      DSH_DESKTOP_NODE_EXECUTABLE: process.execPath,
-      PATH: `${process.argv[6] ?? ''}${delimiter}${process.env.PATH ?? ''}`
-    }
+    env: packageManagerEnvironment(process.env, process.execPath, process.argv[6] ?? '')
   }
-  const application = runProfile({
+  const application = runHostProfile(runtimeDir, {
     environment: loadLayeredEnv('dsh'),
     profile: profileName(),
-    resolvedProfile: { profile, installAnchor },
     patchFiles: productPatchFiles(),
     args: ['--no-open', '--host', '127.0.0.1', '--port', '0'],
     ...(packageManager === undefined ? {} : { packageManager })
-  })
+  }, { profile, installAnchor })
   let stopping: Promise<void> | undefined
   const dragReads = new Map<number, AbortController>()
   const dragTasks = new Set<Promise<void>>()
@@ -131,7 +145,9 @@ async function main(): Promise<void> {
   sendIpc({
     type: 'ready',
     url,
-    injections: ctx.webServer.collectIndexInjections(ctx.connection.browserPeer)
+    injections: ctx.webServer.collectIndexInjections(ctx.connection.browserPeer),
+    // Named Loader ids, with anonymous ids replaced by their module name.
+    enabledPlugins: await enabledPluginIds(ctx)
   })
 }
 
@@ -146,7 +162,7 @@ function sendIpc(message: object, callback?: (error: Error | null) => void): voi
   })
 }
 
-async function reloadOverlayPatches(ctx: Awaited<ReturnType<typeof runProfile>>['ctx']): Promise<boolean> {
+async function reloadOverlayPatches(ctx: Awaited<ReturnType<typeof runHostProfile>>['ctx']): Promise<boolean> {
   const run = async (): Promise<boolean> => {
     const profileContext = ctx.get('profileContext') as (ProfileContext & { overlays: ReturnType<typeof loadOverlayPatches> }) | undefined
     if (profileContext === undefined) throw new Error('Profile context unavailable')

@@ -1,5 +1,5 @@
 import { RENDCORE_UPSTREAM_IPC, type RendCoreModelRefreshResult, type RendCoreUpstreamSnapshot } from '../shared/rendcore-upstreams'
-import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, webUtils, type IpcRendererEvent } from 'electron'
 import type {
   DesktopShortcutInput,
   ShortcutConfigSnapshot,
@@ -14,10 +14,13 @@ import { createSidebarBrowserBridge } from './sidebar-browser'
 import { usesDesktopCaption } from '../shared/desktop-menu'
 import { markDesktopPlatform } from './desktop-platform'
 import { mountUpdateMirrorSettings } from './update-mirror-settings'
+import { mountMacosPreviewChrome } from './macos-window-chrome'
+import { mountMacosWindowTheme } from './macos-window-theme'
 import { mountDesktopUpdateUi } from './desktop-update-ui'
 import { markWindowsTitlebar, mountWindowsTitlebarLayout } from './windows-titlebar'
 import { mountSafeModeFrame } from './safe-mode-frame'
 import { isSafeModeRenderer } from '../main/shell/mobile-pairing'
+import { installScrollDragRegionRefresh } from './scroll-drag-region-refresh'
 
 const appDocument = location.protocol === `${SCHEME}:` && location.hostname === 'app'
 const webImportDocument = location.protocol === 'file:' && location.pathname.endsWith('/web-import.html')
@@ -42,6 +45,24 @@ if (webImportDocument) {
 
 if (appDocument) {
   markDesktopPlatform(document, process.platform)
+  if (process.platform === 'darwin') {
+    mountMacosPreviewChrome(document, () => webFrame.getZoomFactor(), listener => {
+      const receive = (_event: IpcRendererEvent, value: unknown): void => {
+        if (typeof value === 'boolean') listener(value)
+      }
+      ipcRenderer.on(DESKTOP_IPC.windowFullscreen, receive)
+      return () => ipcRenderer.off(DESKTOP_IPC.windowFullscreen, receive)
+    })
+    // The page publishes data-ds-theme-source before the sidebar paints.
+    // Native vibrancy follows that source only after the main process sees it.
+    const mountTheme = (): void => {
+      if (document.body === null) return
+      const dispose = mountMacosWindowTheme(document, ipcRenderer)
+      window.addEventListener('unload', dispose, { once: true })
+    }
+    if (document.body !== null) mountTheme()
+    else document.addEventListener('DOMContentLoaded', mountTheme, { once: true })
+  }
   setupDesktopStoragePersistence()
   // The custom-scheme preload runs before documentElement exists. Mounting the
   // update card at that moment throws and drops the rest of this bridge.
@@ -175,3 +196,4 @@ if (appDocument) {
   })
 }
 contextBridge.exposeInMainWorld('dshDesktop', desktopBridge)
+if (appDocument && process.platform === 'darwin') installScrollDragRegionRefresh(document)

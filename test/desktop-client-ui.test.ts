@@ -17,6 +17,7 @@ describe('DSH Desktop client slot occupants', () => {
       path.join(projectRoot, 'packages', 'dsh-desktop-client-ui', 'client.js'),
       'utf8'
     )
+    expect(source).not.toMatch(/Bisheng|enterprise\.work|dshEnterprise|desktop\.chatWork|remote\.skills|SharedCollection|WorkResource/)
     let definition: {
       factory: (require: (id: string) => unknown) => {
         apply: (ctx: unknown) => void
@@ -54,7 +55,6 @@ describe('DSH Desktop client slot occupants', () => {
       props: { ...props, children }
     })
     const BrandWordmark = vi.fn()
-    const FishLogo = vi.fn()
     const plugin = definition!.factory((id) => {
       if (id === 'react') {
         return {
@@ -64,7 +64,7 @@ describe('DSH Desktop client slot occupants', () => {
         }
       }
       if (id === '@deepseek-ai/dsh-client-ui-primitives') {
-        return { BrandWordmark, FishLogo }
+        return { BrandWordmark }
       }
       throw new Error(`Unexpected client dependency: ${id}`)
     })
@@ -88,14 +88,13 @@ describe('DSH Desktop client slot occupants', () => {
     }
     plugin.apply({ slots, locale: { register: () => () => undefined, bind: () => (key: string) => key }, effect: (setup: () => (() => void) | undefined) => { disposeStyle = setup() } })
 
-    expect(plugin.inject).toEqual(['locale', 'slots', 'remote.session', 'sessions', 'uiWorkspace'])
+    expect(plugin.inject).toEqual(['locale', 'slots', 'remote.session', 'sessions', 'uiWorkspace', 'configForms', 'sidebarRight', 'sidebarRightTabs'])
     expect(registrations.map(({ config }) => config.name)).toEqual([
       'conversation.input.dock',
       'sidebar.settings.action',
       'sidebar.brand.mark',
       'sidebar.brand.name',
       'conversation.hero.brand.mark',
-      'sidebar.right.tab.document.unpreviewable',
       'sidebar.workspaces.session.menu.item',
       'sidebar.workspaces.session.menu.item',
       'sidebar.workspaces.session.menu.item'
@@ -114,9 +113,12 @@ describe('DSH Desktop client slot occupants', () => {
     expect(sidebarName.type).toBe('span')
     expect(sidebarName.props.children).toEqual(['LQY'])
 
-    const sidebarMark = registrations.find(
+    const sidebarMarkEl = registrations.find(
       ({ config }) => config.name === 'sidebar.brand.mark'
-    )!.component({ size: 24 }) as { type: unknown; props: Record<string, unknown> }
+    )!.component({ size: 24 }) as { type: ((props: Record<string, unknown>) => { type: unknown; props: Record<string, unknown> }) | string; props: Record<string, unknown> }
+    const sidebarMark = typeof sidebarMarkEl.type === 'function'
+      ? sidebarMarkEl.type(sidebarMarkEl.props)
+      : sidebarMarkEl
     expect(sidebarMark.type).toBe('svg')
     expect(sidebarMark.props.height).toBe(17)
     const [lightMark, darkMark] = sidebarMark.props.children as [
@@ -378,6 +380,9 @@ describe('DSH Desktop client slot occupants', () => {
     root.provide('remote.settings', { describe, mutate } as never)
     root.provide('sessions', { list: { getSnapshot: () => ({ byId: {} }) } } as never)
     root.provide('uiWorkspace', { deleteSession: vi.fn() } as never)
+    root.provide('configForms', { get: () => undefined } as never)
+    root.provide('sidebarRight', { openTabIn: vi.fn() } as never)
+    root.provide('sidebarRightTabs', { get: () => undefined } as never)
     const fiber = root.plugin(plugin)
     await fiber
     const entry = registered.find((row) => row.config.name === 'conversation.input.right')
@@ -459,6 +464,9 @@ describe('DSH Desktop client slot occupants', () => {
     root.provide('remote.settings', { describe, mutate } as never)
     root.provide('sessions', { list: { getSnapshot: () => ({ byId: {} }) } } as never)
     root.provide('uiWorkspace', { deleteSession: vi.fn() } as never)
+    root.provide('configForms', { get: () => undefined } as never)
+    root.provide('sidebarRight', { openTabIn: vi.fn() } as never)
+    root.provide('sidebarRightTabs', { get: () => undefined } as never)
     const fiber = root.plugin(plugin)
     await fiber
     const entry = registered.find((row) => row.config.name === 'conversation.input.right')

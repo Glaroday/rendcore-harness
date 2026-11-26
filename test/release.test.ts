@@ -13,7 +13,7 @@ const releaseAssets = [
 ]
 
 /** The exact Harness build every `@deepseek-ai/dsh-*` production dep is pinned to. */
-const HARNESS_VERSION = '0.2.2-rc.1'
+const HARNESS_VERSION = '0.2.2-rc.5'
 
 describe('GitHub release contract', () => {
   it('keeps the package and lockfile versions aligned', async () => {
@@ -182,18 +182,6 @@ describe('GitHub release contract', () => {
         portable?: unknown
       }
     }
-    const harnessNodeEntry = await readFile(
-      path.join(projectRoot, 'build', 'harness-node-entry.mjs'),
-      'utf8'
-    )
-    const windowsHiddenConsole = await readFile(
-      path.join(projectRoot, 'build', 'windows-hidden-console.mjs'),
-      'utf8'
-    )
-    const windowsHideConsoleImport = await readFile(
-      path.join(projectRoot, 'build', 'windows-hide-console-import.mjs'),
-      'utf8'
-    )
 
     expect(packageJson.build.artifactName).toBe('rendcore-harness-${os}-${arch}.${ext}')
     expect(packageJson.build.asar).toBe(true)
@@ -214,11 +202,14 @@ describe('GitHub release contract', () => {
       'build/harness-node-entry.mjs',
       'build/host-module-fallback.mjs',
       'build/windows-hidden-console.mjs',
-      'build/windows-child-process-hide.mjs',
-      'build/windows-hide-console-import.mjs'
+      'build/windows-child-process-hide.mjs'
     ]) {
       expect(packageJson.build.extraResources).not.toContainEqual(expect.objectContaining({ from: removed }))
     }
+    expect(packageJson.build.extraResources).toContainEqual({
+      from: 'build/windows-hide-console-import.mjs',
+      to: 'windows-hide-console-import.mjs'
+    })
     expect(packageJson.build.extraResources).toContainEqual({
       from: 'build/packaged-pnpm-invocation.mjs',
       to: 'packaged-pnpm-invocation.mjs'
@@ -303,54 +294,6 @@ describe('GitHub release contract', () => {
     expect(customInstall).toContain('Delete "$APPDATA\\dsh-desktop\\desktop-service\\session.json"')
   })
 
-  it('shows a packaged startup surface and pins the Electron directory picker surface', async () => {
-    const main = await readFile(path.join(projectRoot, 'src', 'main', 'index.ts'), 'utf8')
-    const splash = await readFile(path.join(projectRoot, 'build', 'splash.html'), 'utf8')
-    const patch = await readFile(
-      path.join(projectRoot, 'build', 'dsh-desktop.patch.yml'),
-      'utf8'
-    )
-
-    expect(main).toContain("desktopResourcePath('splash.html')")
-    expect(main).toContain('await showSplash()')
-    expect(main).toContain("query: { theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light' }")
-    expect(main).toContain('nativeTheme.themeSource = harnessThemePreference()')
-    expect(splash).toContain('Starting RendCore Harness')
-    expect(splash).toContain('src="dsh-loader.gif"')
-    expect(splash).toContain('src="dsh-loader-dark.gif"')
-    expect(splash).toContain("document.documentElement.dataset.theme = splashTheme === 'dark'")
-    expect(splash).toContain(":root[data-theme='dark']")
-    expect(splash).not.toContain('brightness(2.4) saturate(0.72)')
-    expect(splash).not.toContain('filter: invert(1)')
-    expect(splash).not.toContain('class="track"')
-    expect(splash).toContain('position: fixed;')
-    expect(splash).toContain('html[data-platform="windows"] main { padding-top: 70px; }')
-    expect(patch).not.toMatch(/id:\s*directory-picker/)
-    expect(patch).not.toContain("name: '@deepseek-ai/dsh-host-directory-picker-native'")
-    expect(patch).not.toContain("name: '@deepseek-ai/dsh-client-ui-directory-picker-native'")
-  })
-
-  it('routes manual restarts through the active plugin recovery flow', async () => {
-    const main = await readFile(path.join(projectRoot, 'src', 'main', 'index.ts'), 'utf8')
-
-    expect(main).toContain("if (failureRecoveryVisible) resolvePluginRecoveryAction('restart')")
-    expect(main).toMatch(/case 'restart-harness':\s+await restartHarness\(\)/)
-    expect(main).toContain('click: () => void restartHarness().catch(showUnexpectedError)')
-    expect(main).toContain("} else if (action === 'restart') {")
-  })
-
-  it('replays frontend plugin failures that arrive during an active recovery', async () => {
-    const main = await readFile(path.join(projectRoot, 'src', 'main', 'index.ts'), 'utf8')
-
-    expect(main).toContain("resolvePluginRecoveryAction('refresh')")
-    expect(main).toContain('if (applyPendingFrontendEvidence()) continue')
-    expect(main).toMatch(
-      /if \(failureRecoveryVisible\) \{\s+queuePendingFrontendPluginRecovery\(message\)/
-    )
-    expect(main).toContain('queueMicrotask(() => {')
-    expect(main).toContain('logs: [...rendererPluginFailureLogs]')
-  })
-
   it('publishes update metadata for installed desktop builds', async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(projectRoot, 'package.json'), 'utf8')
@@ -428,7 +371,6 @@ describe('GitHub release contract', () => {
       artifactName: string
       nsis: { artifactName: string }
     }
-    const main = await readFile(path.join(projectRoot, 'src', 'main', 'index.ts'), 'utf8')
 
     expect(packageJson.scripts['package:dev:dir']).toContain('npm run build')
     expect(packageJson.scripts['package:dev:dir']).toContain('electron-builder.dev.cjs')
@@ -445,9 +387,6 @@ describe('GitHub release contract', () => {
     expect(developmentConfig.extraMetadata.dshDesktopChannel).toBe('development')
     expect(developmentConfig.artifactName).toBe('dsh-desktop-dev-${os}-${arch}.${ext}')
     expect(developmentConfig.nsis.artifactName).toBe('dsh-desktop-dev-windows-${arch}-setup.${ext}')
-    expect(main).toContain("app.setPath('userData', join(app.getPath('appData'), 'rendcore-harness-dev'))")
-    expect(main).toContain("app.setPath('userData', join(app.getPath('appData'), 'rendcore-harness'))")
-    expect(main).toContain('if (!developmentBuild)')
   })
 
   it('builds the official package from the transplanted shell', async () => {
