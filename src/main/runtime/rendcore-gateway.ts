@@ -1,13 +1,36 @@
 import type { RendCoreUpstreamStatus } from '../../shared/rendcore-upstreams'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, request, type IncomingMessage, type ServerResponse } from 'node:http'
+import { isKeyFilteredCatalog, parseCapabilities, toOpenAIModelList } from './rendcore-capabilities'
 
 export const RENDCORE_API_ENDPOINTS = [
   'http://8.138.248.191:18036/v1',
   'http://47.103.24.134:18036/v1',
   'http://a.88frp.asia:8317/v1'
 ] as const
-export const RENDCORE_CAPABILITIES_ENDPOINT = 'http://47.103.24.134:8600/api/models'
+export const RENDCORE_CATALOG_ENDPOINTS = [
+  'http://8.138.248.191:8600/api/models',
+  'http://47.103.24.134:8600/api/models',
+  'http://a.88frp.asia:8600/api/models'
+] as const
+export const RENDCORE_CAPABILITIES_ENDPOINT = RENDCORE_CATALOG_ENDPOINTS[0]
+
+const RENDCORE_CATALOG_BY_ENDPOINT: Readonly<Record<string, string>> = {
+  [RENDCORE_API_ENDPOINTS[0]]: RENDCORE_CATALOG_ENDPOINTS[0],
+  [RENDCORE_API_ENDPOINTS[1]]: RENDCORE_CATALOG_ENDPOINTS[1],
+  [RENDCORE_API_ENDPOINTS[2]]: RENDCORE_CATALOG_ENDPOINTS[2]
+}
+
+export function rendcoreCatalogEndpointFor(endpoint: string): string | undefined {
+  return RENDCORE_CATALOG_BY_ENDPOINT[endpoint]
+}
+
+export function orderedRendCoreCatalogEndpoints(preferredEndpoint?: string): string[] {
+  const preferredCatalog = preferredEndpoint ? rendcoreCatalogEndpointFor(preferredEndpoint) : undefined
+  return preferredCatalog
+    ? [preferredCatalog, ...RENDCORE_CATALOG_ENDPOINTS.filter(url => url !== preferredCatalog)]
+    : [...RENDCORE_CATALOG_ENDPOINTS]
+}
 
 export interface RendCoreGateway {
   baseURL: string
@@ -16,6 +39,7 @@ export interface RendCoreGateway {
 
 interface GatewayOptions {
   endpoints?: readonly string[]
+  catalogEndpoints?: Readonly<Record<string, string>>
   preferredEndpoint?: () => string | undefined
   onSelected?: (endpoint: string) => void
   probeTimeoutMs?: number
@@ -49,6 +73,53 @@ function fail(response: ServerResponse, status: number, message: string): void {
   if (response.destroyed) return
   response.writeHead(status, { 'Content-Type': 'application/json' })
   response.end(JSON.stringify({ error: { type: 'api_error', message } }))
+}
+
+async function fetchCatalogModelsResponse(
+  endpoint: string,
+  authorization: string,
+  catalogEndpoints: Readonly<Record<string, string>> | undefined,
+  shutdown: AbortSignal
+): Promise<{ status: number; body: string } | undefined> {
+  const explicit = catalogEndpoints?.[endpoint]
+  const matched = explicit ?? rendcoreCatalogEndpointFor(endpoint)
+  if (!matched) return undefined
+  const candidates = explicit
+    ? [matched]
+    : [matched, ...RENDCORE_CATALOG_ENDPOINTS.filter(url => url !== matched)]
+  for (const catalogURL of candidates) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8_000)
+    const signal = AbortSignal.any([controller.signal, shutdown])
+    try {
+      const reply = await fetch(catalogURL, {
+        headers: { Authorization: authorization, Accept: 'application/json' },
+        redirect: 'error',
+        signal
+      })
+      if (reply.status === 401 || reply.status === 403) {
+        await reply.body?.cancel()
+        return {
+          status: reply.status,
+          body: JSON.stringify({ error: { type: 'api_error', message: 'Enter your RendCore API key in Settings.' } })
+        }
+      }
+      if (!reply.ok) {
+        await reply.body?.cancel()
+        continue
+      }
+      const payload: unknown = await reply.json()
+      const models = parseCapabilities(payload)
+      if (models.length > 0 || isKeyFilteredCatalog(payload)) {
+        return { status: 200, body: JSON.stringify(toOpenAIModelList(models)) }
+      }
+    } catch {
+      if (shutdown.aborted) return undefined
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return undefined
 }
 
 /** Host-owned, loopback-only bridge. Keys stay on requests, never in patches or logs.
@@ -124,6 +195,15 @@ export async function startRendCoreGateway(options: GatewayOptions = {}): Promis
     }
     if (shutdown.signal.aborted || response.destroyed) return
     options.onSelected?.(endpoint)
+    if (incoming.method === 'GET' && route === '/v1/models') {
+      const catalogReply = await fetchCatalogModelsResponse(endpoint, authorization, options.catalogEndpoints, shutdown.signal)
+      if (shutdown.signal.aborted || response.destroyed) return
+      if (catalogReply !== undefined) {
+        response.writeHead(catalogReply.status, { 'Content-Type': 'application/json' })
+        response.end(catalogReply.body)
+        return
+      }
+    }
     const headers: Record<string, string> = { Authorization: authorization }
     for (const name of ['content-type', 'content-length', 'accept', 'openai-beta', 'openai-organization', 'openai-project']) {
       const value = incoming.headers[name]

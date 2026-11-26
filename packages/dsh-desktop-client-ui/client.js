@@ -324,7 +324,227 @@ window.__ModuleLoader__.load({
       en: { title: 'RendCore upstreams', automatic: 'Automatic (primary first)', preference: 'Preferred upstream', main: 'Primary', backup: 'Backup', current: 'Last used', refresh: 'Check upstreams', close: 'Close', pending: 'Checking or saving…', unknown: 'Not checked', available: 'Available', 'auth-required': 'Reachable; key unverified or rejected', unavailable: 'Unavailable', error: 'The operation did not complete. Try again.', hint: 'Backups are used if the preferred upstream is unavailable. This check only tests the model list.' }
     }
 
-    function RendCoreUpstreamsEntry({ t }) {
+    const REFRESH_MODELS_NS = 'dsh-desktop-rendcore-models'
+    const refreshModelsMessages = {
+      zh: {
+        button: '刷新可用模型',
+        refreshing: '刷新中…',
+        updated: '已更新 {count} 个模型',
+        unchanged: '已是最新（{count} 个）',
+        failed: '刷新失败：{error}'
+      },
+      en: {
+        button: 'Refresh models',
+        refreshing: 'Refreshing…',
+        updated: 'Updated {count} models',
+        unchanged: 'Up to date ({count})',
+        failed: 'Refresh failed: {error}'
+      }
+    }
+
+    function sameModelCatalog(left, right) {
+      if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
+      try {
+        return JSON.stringify(left) === JSON.stringify(right)
+      } catch {
+        return false
+      }
+    }
+
+    function createModelRefreshCoordinator(ctx, t) {
+      let state = { busy: false, status: null }
+      let inFlight = null
+      let feedbackTimer = null
+      let disposed = false
+      let injectedSettings = null
+      const listeners = new Set()
+
+      if (typeof ctx.inject === 'function') {
+        ctx.inject(['remote.settings'], (scope) => {
+          injectedSettings = scope.remote.settings
+          scope.effect(() => () => {
+            if (injectedSettings === scope.remote.settings) injectedSettings = null
+          })
+        })
+      }
+
+      const notify = () => {
+        for (const listener of listeners) listener(state)
+      }
+
+      const setState = (patch) => {
+        if (disposed) return
+        state = { ...state, ...patch }
+        notify()
+      }
+
+      const showStatus = (status, timeoutMs) => {
+        if (feedbackTimer !== null) clearTimeout(feedbackTimer)
+        setState({ status })
+        if (status && timeoutMs > 0) {
+          feedbackTimer = setTimeout(() => {
+            feedbackTimer = null
+            setState({ status: null })
+          }, timeoutMs)
+        }
+      }
+
+      const applyModelsToHost = async (models) => {
+        const settings = injectedSettings ?? (typeof ctx.get === 'function' ? (ctx.get('remote.settings') ?? ctx.get('remote')?.settings) : ctx.remote?.settings)
+        if (typeof settings?.describe !== 'function' || typeof settings?.mutate !== 'function') {
+          return { changed: false }
+        }
+        const writeWithRetry = async (ns, getOps) => {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const described = await settings.describe()
+            const namespaces = described?.ok ? described.value?.namespaces : described?.namespaces
+            if (!Array.isArray(namespaces)) return { changed: false }
+            const entry = namespaces.find((item) => item?.ns === ns)
+            const ops = getOps(entry)
+            if (!ops) return { changed: false }
+            const response = await settings.mutate(ns, ops, entry?.revision)
+            if (response && response.ok === false) {
+              if (response.error?.code === 'settings/conflict' && attempt === 0) continue
+              throw new Error(response.error?.message || 'settings write failed')
+            }
+            return { changed: true }
+          }
+          return { changed: false }
+        }
+
+        const llmResult = await writeWithRetry('llm-pi-ai', (entry) => {
+          const current = entry?.value?.providers?.rendcore?.models
+          if (!entry?.value?.providers?.rendcore) return null
+          if (sameModelCatalog(current, models)) return null
+          return [{ op: 'set', path: ['providers', 'rendcore', 'models'], value: models }]
+        })
+
+        try {
+          await writeWithRetry('agent-default-model', (entry) => {
+            if (entry?.applies === false) return null
+            const val = entry?.value
+            if (val?.provider !== 'rendcore' || typeof val?.model !== 'string') return null
+            if (models.some((model) => model.id === val.model)) return null
+            const fallback = models.some((model) => model.id === 'gpt-6.1-sol') ? 'gpt-6.1-sol' : models[0]?.id
+            if (!fallback) return null
+            return [{ op: 'set', path: ['model'], value: fallback }]
+          })
+        } catch {
+          // Best-effort: a user or overlay patch may pin agent-default-model; llm-pi-ai is already updated.
+        }
+
+        return llmResult
+      }
+
+      const refresh = (reason = 'manual') => {
+        if (inFlight) return inFlight
+        const bridge = window.dshDesktop
+        if (typeof bridge?.refreshRendCoreModels !== 'function') return Promise.resolve({ ok: false, models: [] })
+        inFlight = (async () => {
+          setState({ busy: true, ...(reason === 'manual' ? { status: null } : {}) })
+          try {
+            const result = await bridge.refreshRendCoreModels()
+            if (!result?.ok || !Array.isArray(result.models) || result.models.length === 0) {
+              if (reason === 'manual') {
+                showStatus({ kind: 'err', text: t('failed', { error: result?.error || 'unavailable' }) }, 5000)
+              }
+              return result
+            }
+            const applied = result.applied === true
+              ? { changed: result.changed !== false }
+              : await applyModelsToHost(result.models)
+            if (reason === 'manual') {
+              showStatus({
+                kind: 'ok',
+                text: t(applied.changed ? 'updated' : 'unchanged', { count: String(result.models.length) })
+              }, 3500)
+            }
+            return result
+          } catch (error) {
+            if (reason === 'manual') {
+              const msg = error instanceof Error ? error.message : String(error)
+              showStatus({ kind: 'err', text: t('failed', { error: msg }) }, 5000)
+            }
+            return { ok: false, models: [] }
+          } finally {
+            inFlight = null
+            setState({ busy: false })
+          }
+        })()
+        return inFlight
+      }
+
+      return {
+        getSnapshot: () => state,
+        subscribe: (listener) => {
+          listeners.add(listener)
+          return () => listeners.delete(listener)
+        },
+        refresh,
+        dispose: () => {
+          disposed = true
+          if (feedbackTimer !== null) {
+            clearTimeout(feedbackTimer)
+            feedbackTimer = null
+          }
+          listeners.clear()
+        }
+      }
+    }
+
+    function RefreshModelsIcon({ spinning }) {
+      return React.createElement(
+        'svg',
+        {
+          width: 13,
+          height: 13,
+          viewBox: '0 0 16 16',
+          fill: 'none',
+          'aria-hidden': 'true',
+          className: spinning ? 'dshDesktopRefreshSpin' : undefined
+        },
+        React.createElement('path', {
+          d: 'M13.5 8a5.5 5.5 0 1 1-1.35-3.6M13.5 2.75v2.5H11',
+          stroke: 'currentColor',
+          strokeWidth: 1.4,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round'
+        })
+      )
+    }
+
+    function RendCoreRefreshModelsButton({ t, coordinator }) {
+      const [snapshot, setSnapshot] = React.useState(() => coordinator.getSnapshot())
+      React.useEffect(() => {
+        setSnapshot(coordinator.getSnapshot())
+        return coordinator.subscribe(setSnapshot)
+      }, [coordinator])
+      const h = React.createElement
+      return h(
+        'div',
+        { className: 'dshDesktopRefreshModelsWrap' },
+        snapshot.status && h('span', {
+          className: 'dshDesktopRefreshStatus',
+          'data-kind': snapshot.status.kind,
+          role: snapshot.status.kind === 'err' ? 'alert' : 'status'
+        }, snapshot.status.text),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dshDesktopRefreshModels',
+            'data-rendcore-refresh-models': 'true',
+            disabled: snapshot.busy,
+            title: snapshot.status?.text || t('button'),
+            onClick: () => { void coordinator.refresh('manual') }
+          },
+          h(RefreshModelsIcon, { spinning: snapshot.busy }),
+          h('span', null, snapshot.busy ? t('refreshing') : t('button'))
+        )
+      )
+    }
+
+    function RendCoreUpstreamsEntry({ t, onPreferenceSaved }) {
       const bridge = window.dshDesktop?.rendcoreUpstreams
       const [open, setOpen] = React.useState(false)
       const [state, setState] = React.useState(null)
@@ -363,6 +583,7 @@ window.__ModuleLoader__.load({
               const preference = event.target.value || null
               void run(async () => {
                 const saved = await bridge.save(preference)
+                if (typeof onPreferenceSaved === 'function') void onPreferenceSaved()
                 return { ...saved, endpoints: state.endpoints }
               })
             } },
@@ -383,11 +604,60 @@ window.__ModuleLoader__.load({
       applyRepair(ctx)
       ctx.effect(() => ctx.locale.register(ACTIONS_NS, actionMessages))
       const actionText = ctx.locale.bind(ACTIONS_NS)
+      let modelRefreshCoordinator = null
+      if (typeof window.dshDesktop?.refreshRendCoreModels === 'function') {
+        ctx.effect(() => ctx.locale.register(REFRESH_MODELS_NS, refreshModelsMessages))
+        const refreshText = ctx.locale.bind(REFRESH_MODELS_NS)
+        modelRefreshCoordinator = createModelRefreshCoordinator(ctx, refreshText)
+        ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+          name: 'conversation.input.right',
+          id: 'rendcore-refresh-models',
+          order: 100,
+          locale: REFRESH_MODELS_NS,
+          inject: () => ({ t: refreshText, coordinator: modelRefreshCoordinator })
+        }, RendCoreRefreshModelsButton))
+        ctx.effect(() => {
+          let credentialTimer = null
+          const scheduleCredentialRefresh = () => {
+            if (credentialTimer !== null) clearTimeout(credentialTimer)
+            credentialTimer = setTimeout(() => {
+              credentialTimer = null
+              void modelRefreshCoordinator.refresh('credential')
+            }, 600)
+          }
+          const subscribeCredentials = (remote) => typeof remote?.$on === 'function'
+            ? remote.$on('credentials/reference-updated', (ref) => {
+                if (ref === undefined || ref === 'RENDCORE_API_KEY') scheduleCredentialRefresh()
+              })
+            : undefined
+          let unsubscribeCred
+          if (typeof ctx.inject === 'function') {
+            ctx.inject(['remote'], (scope) => {
+              scope.effect(() => subscribeCredentials(scope.remote))
+            })
+          } else {
+            const remote = typeof ctx.get === 'function' ? ctx.get('remote') : ctx.remote
+            unsubscribeCred = subscribeCredentials(remote)
+          }
+          const intervalId = setInterval(() => {
+            void modelRefreshCoordinator.refresh('periodic')
+          }, 60 * 60 * 1000)
+          return () => {
+            if (credentialTimer !== null) clearTimeout(credentialTimer)
+            clearInterval(intervalId)
+            if (typeof unsubscribeCred === 'function') unsubscribeCred()
+            modelRefreshCoordinator.dispose()
+          }
+        })
+      }
       if (window.dshDesktop?.rendcoreUpstreams) {
         ctx.effect(() => ctx.locale.register(UPSTREAM_NS, upstreamMessages))
         ctx.slots.inject('settings.sidebar.footer', () => ctx.slots.register({
           name: 'settings.sidebar.footer', id: 'rendcore-upstreams', locale: UPSTREAM_NS,
-          inject: () => ({ t: ctx.locale.bind(UPSTREAM_NS) })
+          inject: () => ({
+            t: ctx.locale.bind(UPSTREAM_NS),
+            onPreferenceSaved: modelRefreshCoordinator ? () => modelRefreshCoordinator.refresh('upstream') : undefined
+          })
         }, RendCoreUpstreamsEntry))
       }
 
@@ -462,6 +732,37 @@ window.__ModuleLoader__.load({
             outline:2px solid var(--dsw-alias-state-business-primary); outline-offset:2px;
             background:var(--dsw-alias-bg-base);
           }
+          .dshDesktopRefreshModelsWrap {
+            position:relative; display:inline-flex; align-items:center; flex:none; min-width:0;
+          }
+          .dshDesktopRefreshModels {
+            box-sizing:border-box; appearance:none; -webkit-appearance:none;
+            display:inline-flex; align-items:center; gap:5px;
+            height:28px; padding:0 8px; border:0; border-radius:8px;
+            background:transparent; color:var(--dsw-alias-label-secondary);
+            font:inherit; font-size:12.5px; line-height:18px; white-space:nowrap; cursor:pointer;
+          }
+          .dshDesktopRefreshModels:hover:not(:disabled) {
+            background:var(--dsw-alias-interactive-bg-hover,var(--dsw-alias-bg-layer-2));
+            color:var(--dsw-alias-label-primary);
+          }
+          .dshDesktopRefreshModels:focus-visible {
+            outline:2px solid var(--dsw-alias-state-business-primary); outline-offset:2px;
+          }
+          .dshDesktopRefreshModels:disabled { opacity:.65; cursor:wait; }
+          .dshDesktopRefreshSpin { animation:dshDesktopRefreshSpin .9s linear infinite; }
+          .dshDesktopRefreshStatus {
+            position:absolute; right:0; bottom:calc(100% + 6px); z-index:20;
+            padding:4px 8px; border-radius:6px;
+            background:var(--dsw-alias-bg-layer-1,#1e1f22);
+            border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.12));
+            max-width:min(360px, 70vw); overflow:hidden; text-overflow:ellipsis;
+            font-size:12px; line-height:16px; white-space:nowrap; pointer-events:none;
+            color:var(--dsw-alias-label-primary);
+            box-shadow:var(--dsw-elevation-prominent,0 4px 12px rgba(0,0,0,.28));
+          }
+          .dshDesktopRefreshStatus[data-kind="err"] { color:#f04438; }
+          @keyframes dshDesktopRefreshSpin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
         `
         document.head.appendChild(style)
         return () => style.remove()

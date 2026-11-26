@@ -40,6 +40,11 @@ type DesktopHostEvent = ReadyEvent | FatalEvent | PlatformSessionEvent | {
   readonly activeTasks: boolean
   readonly scheduledTasks: boolean
   readonly error?: string
+} | {
+  readonly type: 'reload-overlay'
+  readonly requestId: number
+  readonly changed: boolean
+  readonly error?: string
 }
 
 type DesktopHostControlResponse = Extract<DesktopHostEvent, { readonly requestId: number }>
@@ -195,6 +200,17 @@ export class DesktopHostProcess {
     return response.resource
   }
 
+  async reloadOverlay(): Promise<{ readonly changed: boolean }> {
+    const response = await this.control(
+      { type: 'reload-overlay' },
+      30_000,
+      'Overlay reload timed out',
+      'overlay reload'
+    )
+    if (response.type !== 'reload-overlay') throw new Error('Host returned a different control response')
+    return { changed: response.changed }
+  }
+
   async stop(requireGraceful = false): Promise<void> {
     const child = this.child
     if (child === undefined) return
@@ -251,7 +267,8 @@ export class DesktopHostProcess {
   private async control(
     request: { readonly type: 'update-tasks', readonly action: 'inspect' | 'lock' | 'unlock' }
       | { readonly type: 'quit-inspection' }
-      | { readonly type: 'file-drag-resource', readonly address: string },
+      | { readonly type: 'file-drag-resource', readonly address: string }
+      | { readonly type: 'reload-overlay' },
     deadlineMs: number,
     deadlineMessage: string,
     operation: string,
@@ -337,6 +354,16 @@ export function readDesktopHostEvent(message: unknown): DesktopHostEvent | undef
         : undefined
     case 'file-drag-resource':
       return dragResource(candidate)
+    case 'reload-overlay':
+      return isSafeInteger(candidate.requestId) && typeof candidate.changed === 'boolean'
+        && (candidate.error === undefined || typeof candidate.error === 'string')
+        ? {
+          type: 'reload-overlay',
+          requestId: candidate.requestId,
+          changed: candidate.changed,
+          ...(typeof candidate.error === 'string' ? { error: candidate.error } : {})
+        }
+        : undefined
     case 'quit-inspection':
       return isSafeInteger(candidate.requestId) && typeof candidate.activeTasks === 'boolean'
         && typeof candidate.scheduledTasks === 'boolean'

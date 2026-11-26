@@ -3,29 +3,34 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parse, stringify } from 'yaml'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { RENDCORE_API_ENDPOINTS, RENDCORE_CAPABILITIES_ENDPOINT } from './rendcore-gateway'
+import type { RendCoreModelRefreshResult } from '../../shared/rendcore-upstreams'
+import {
+  orderedRendCoreCatalogEndpoints,
+  RENDCORE_API_ENDPOINTS,
+  RENDCORE_CAPABILITIES_ENDPOINT
+} from './rendcore-gateway'
+import {
+  arrayOfStrings,
+  clampMaxTokens,
+  DEFAULT_INPUT,
+  isImageGenerationOnly,
+  isKeyFilteredCatalog,
+  objectValue,
+  parseCapabilities,
+  parseReasoning,
+  positiveInteger,
+  resolveInput,
+  statedInput,
+  stringValue,
+  unique,
+  type RendCoreModel
+} from './rendcore-capabilities'
+
+export { parseCapabilities, type RendCoreModel }
 
 export const RENDCORE_MODELS_ENDPOINT = `${RENDCORE_API_ENDPOINTS[0]}/models`
 export const RENDCORE_MODEL_CAPABILITIES_ENDPOINT = RENDCORE_CAPABILITIES_ENDPOINT
 const SAFE_DEFAULT_MODEL = 'gpt-6.1-sol'
-
-export interface RendCoreModel {
-  id: string
-  name: string
-  contextWindow?: number
-  maxTokens?: number
-  input: Array<'text' | 'image'>
-  reasoningEfforts?: false | Record<string, string | null>
-  /**
-   * Whether `input` came from the capability service rather than from the
-   * permissive default. Internal: never written to the patch or to settings,
-   * and only entries that stated modalities are remembered in the cache.
-   */
-  inputStated?: boolean
-}
-
-/** The only modalities the pi-ai adapter accepts (MODALITIES in dsh-llm-pi-ai). */
-const DEFAULT_INPUT: Array<'text' | 'image'> = ['text', 'image']
 
 /** Where the capabilities last stated by the service are remembered. */
 const CAPABILITY_CACHE_FILE = 'rendcore-model-capabilities.json'
@@ -43,42 +48,116 @@ interface CatalogResult {
   source: 'online' | 'capabilities' | 'cache' | 'bundled'
 }
 
+export interface PrepareCatalogOptions {
+  preferredEndpoint?: string
+  catalogEndpoints?: readonly string[]
+  fallbackApiKey?: string
+  baseURL?: string
+}
+
+async function fetchFromCatalogEndpoints(
+  catalogEndpoints: readonly string[],
+  apiKey: string | undefined,
+  log: (line: string) => void
+): Promise<{
+  models: RendCoreModel[]
+  source?: 'online' | 'capabilities'
+  keyFilteredEmpty: boolean
+  rejectedStatus?: number
+  lastError?: string
+}> {
+  const catalogHeaders = apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
+  let lastError: string | undefined
+  for (const catalogURL of catalogEndpoints) {
+    const result = await fetchCatalog(catalogURL, catalogHeaders, 8_000)
+    if (!result.ok) {
+      lastError = result.error
+      log(`[desktop] RendCore capability discovery failed (${catalogURL}): ${result.error}`)
+      if (result.status === 401 || result.status === 403) {
+        return { models: [], keyFilteredEmpty: false, rejectedStatus: result.status, lastError: result.error }
+      }
+      continue
+    }
+    const parsed = parseCapabilities(result.payload)
+    if (parsed.length > 0) {
+      return {
+        models: parsed,
+        source: apiKey ? 'online' : 'capabilities',
+        keyFilteredEmpty: false
+      }
+    }
+    if (isKeyFilteredCatalog(result.payload)) {
+      log(`[desktop] RendCore catalog (${catalogURL}) returned 0 available chat models for this key`)
+      return { models: [], keyFilteredEmpty: true }
+    }
+  }
+  return { models: [], keyFilteredEmpty: false, lastError }
+}
+
+export async function refreshRendCoreModelCatalog(
+  basePatchPath: string,
+  dshHome: string,
+  log: (line: string) => void,
+  options: PrepareCatalogOptions = {}
+): Promise<RendCoreModelRefreshResult> {
+  const cachedPath = join(dshHome, 'rendcore-online.patch.yml')
+  const remembered = await readCapabilityCache(dshHome, log)
+  const apiKey = (await readStoredApiKey(dshHome)) || stringValue(options.fallbackApiKey) || undefined
+  const catalogEndpoints = options.catalogEndpoints ?? orderedRendCoreCatalogEndpoints(options.preferredEndpoint)
+  const discovery = await fetchFromCatalogEndpoints(catalogEndpoints, apiKey, log)
+
+  if (discovery.rejectedStatus !== undefined) {
+    return { ok: false, models: [], error: `API key rejected (HTTP ${discovery.rejectedStatus})` }
+  }
+  if (discovery.keyFilteredEmpty) {
+    return { ok: false, models: [], error: 'This API key has no available chat models.' }
+  }
+  if (discovery.models.length === 0) {
+    return { ok: false, models: [], error: discovery.lastError ?? 'RendCore catalog endpoints are unavailable.' }
+  }
+
+  const models = mergeRememberedCapabilities(discovery.models, remembered, false)
+  const effectiveBaseURL = options.baseURL ?? await readActiveBaseURL(cachedPath) ?? RENDCORE_API_ENDPOINTS[0]
+  const base = await readFile(basePatchPath, 'utf8')
+  const rendered = replaceCatalog(replaceBaseURL(base, effectiveBaseURL), models)
+  await writeManagedText(cachedPath, rendered)
+  await writeCapabilityCache(dshHome, models, remembered, log)
+  await repairDefaultModel(dshHome, new Set(models.map((model) => model.id)))
+  const source = discovery.source ?? 'online'
+  log(`[desktop] refreshed ${models.length} RendCore models from ${source}`)
+  return { ok: true, models: models.map((model) => publicModel(model)), source }
+}
+
 export async function prepareRendCoreModelCatalog(
   basePatchPath: string,
   dshHome: string,
   log: (line: string) => void,
-  baseURL: string = RENDCORE_API_ENDPOINTS[0]
+  baseURL: string = RENDCORE_API_ENDPOINTS[0],
+  options: PrepareCatalogOptions = {}
 ): Promise<CatalogResult> {
   const cachedPath = join(dshHome, 'rendcore-online.patch.yml')
   await sanitizeStoredModels(dshHome, log)
   const remembered = await readCapabilityCache(dshHome, log)
-  const capabilities = await fetchJson(RENDCORE_MODEL_CAPABILITIES_ENDPOINT, undefined, 8_000)
-    .then(parseCapabilities)
-    .catch((error: unknown) => {
-      log(`[desktop] RendCore capability discovery failed: ${message(error)}`)
-      return []
-    })
-  const apiKey = await readStoredApiKey(dshHome)
+  const apiKey = (await readStoredApiKey(dshHome)) || stringValue(options.fallbackApiKey) || undefined
+  const catalogEndpoints = options.catalogEndpoints ?? orderedRendCoreCatalogEndpoints(options.preferredEndpoint)
+  const discovery = await fetchFromCatalogEndpoints(catalogEndpoints, apiKey, log)
 
-  let models: RendCoreModel[] = []
-  let source: CatalogResult['source'] = 'bundled'
-  if (apiKey) {
+  let models: RendCoreModel[] = discovery.models
+  let source: CatalogResult['source'] = discovery.source ?? 'bundled'
+
+  if (models.length === 0 && !discovery.keyFilteredEmpty && discovery.rejectedStatus === undefined && apiKey) {
     try {
       const payload = await fetchJson(
         `${baseURL}/models`,
         { Authorization: `Bearer ${apiKey}` },
         15_000
       )
-      models = mergeCatalogIds(parseModelIds(payload), capabilities)
+      models = mergeCatalogIds(parseModelIds(payload), [])
       if (models.length === 0) throw new Error('the gateway returned no chat models')
       source = 'online'
     } catch (error) {
       log(`[desktop] RendCore model discovery failed: ${message(error)}`)
     }
-  }
-  if (models.length === 0 && capabilities.length > 0) {
-    models = capabilities
-    source = 'capabilities'
   }
 
   if (models.length > 0) {
@@ -115,6 +194,17 @@ export async function prepareRendCoreModelCatalog(
   return { path: cachedPath, models: [], source: 'bundled' }
 }
 
+async function readActiveBaseURL(cachedPath: string): Promise<string | undefined> {
+  if (!existsSync(cachedPath)) return undefined
+  try {
+    const content = await readFile(cachedPath, 'utf8')
+    const match = content.match(/\n      rendcore:\r?\n[\s\S]*?\n        baseURL:\s*([^\r\n]+)/)
+    return match?.[1]?.trim() || undefined
+  } catch {
+    return undefined
+  }
+}
+
 // Preserve the composition's comments and expression tags, changing only this provider.
 function replaceBaseURL(source: string, baseURL: string): string {
   return source.replace(/(\n      rendcore:\r?\n[\s\S]*?\n        baseURL:\s*)[^\r\n]+/, (_match, prefix: string) => `${prefix}${baseURL}`)
@@ -122,33 +212,6 @@ function replaceBaseURL(source: string, baseURL: string): string {
 
 async function writeManagedText(path: string, text: string): Promise<void> {
   await writeFileAtomic(path, text, { mode: 0o600 })
-}
-
-export function parseCapabilities(payload: unknown): RendCoreModel[] {
-  const entries = payload && typeof payload === 'object'
-    ? (payload as Record<string, unknown>).models
-    : undefined
-  if (!Array.isArray(entries)) return []
-  return unique(entries.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object') return []
-    const value = entry as Record<string, unknown>
-    if (value.configured === false) return []
-    const id = stringValue(value.id)
-    if (!id || isImageGenerationOnly(id, value)) return []
-    const modalities = arrayOfStrings(
-      value.input ?? value.modalities ?? value.input_modalities ?? value.supported_modalities
-    )
-    const input = resolveInput(modalities, value)
-    return [{
-      id,
-      name: stringValue(value.display_name ?? value.displayName ?? value.name) || id,
-      contextWindow: positiveInteger(value.context ?? value.context_window ?? value.contextWindow),
-      maxTokens: positiveInteger(value.max_output ?? value.max_tokens ?? value.maxTokens),
-      input: input.value,
-      inputStated: input.stated,
-      reasoningEfforts: parseReasoning(value.thinking ?? value.reasoning_efforts ?? value.reasoningEfforts)
-    }]
-  }))
 }
 
 function modelsFromPatch(payload: unknown): RendCoreModel[] {
@@ -216,11 +279,18 @@ function replaceCatalog(source: string, models: RendCoreModel[]): string {
   const summaryModel = [...models].sort((a, b) =>
     (b.contextWindow ?? 0) - (a.contextWindow ?? 0) || (b.maxTokens ?? 0) - (a.maxTokens ?? 0)
   )[0]?.id ?? SAFE_DEFAULT_MODEL
+  const defaultModel = models.some((model) => model.id === SAFE_DEFAULT_MODEL)
+    ? SAFE_DEFAULT_MODEL
+    : (models[0]?.id ?? SAFE_DEFAULT_MODEL)
   return source
     .replace(modelMarker, `$1${rows}`)
     .replace(
       /(summarizationProvider:\s*rendcore\r?\n\s+summarizationModel:\s*)[^\r\n]+/,
       `$1${summaryModel}`
+    )
+    .replace(
+      /(id:\s*agent-default-model\r?\n[\s\S]*?provider:\s*rendcore\r?\n\s+model:\s*)[^\r\n]+/,
+      `$1${defaultModel}`
     )
 }
 
@@ -261,11 +331,16 @@ function normalizeStoredModelList(value: unknown): RendCoreModel[] {
     const model = objectValue(entry)
     const id = stringValue(model?.id)
     if (!model || !id || isImageGenerationOnly(id, model)) return []
+    const contextWindow = positiveInteger(model.contextWindow ?? model.context_window ?? model.context)
+    const maxTokens = clampMaxTokens(
+      positiveInteger(model.maxTokens ?? model.max_tokens ?? model.max_output),
+      contextWindow
+    )
     return [{
       id,
       name: stringValue(model.name) || id,
-      contextWindow: positiveInteger(model.contextWindow ?? model.context_window ?? model.context),
-      maxTokens: positiveInteger(model.maxTokens ?? model.max_tokens ?? model.max_output),
+      contextWindow,
+      maxTokens,
       input: resolveInput(arrayOfStrings(model.input), model).value,
       reasoningEfforts: parseReasoning(model.reasoningEfforts ?? model.reasoning_efforts ?? model.thinking)
     }]
@@ -294,6 +369,27 @@ export async function readStoredApiKey(dshHome: string): Promise<string | undefi
   }
 }
 
+async function fetchCatalog(
+  url: string,
+  headers: Record<string, string> | undefined,
+  timeoutMs: number
+): Promise<{ ok: true; payload: unknown } | { ok: false; status?: number; error: string }> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { headers, signal: controller.signal, redirect: 'error' })
+    if (!response.ok) {
+      await response.body?.cancel()
+      return { ok: false, status: response.status, error: `HTTP ${response.status}` }
+    }
+    return { ok: true, payload: await response.json() }
+  } catch (error) {
+    return { ok: false, error: message(error) }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 async function fetchJson(url: string, headers: Record<string, string> | undefined, timeoutMs: number): Promise<unknown> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -304,44 +400,6 @@ async function fetchJson(url: string, headers: Record<string, string> | undefine
   } finally {
     clearTimeout(timeout)
   }
-}
-
-function parseReasoning(value: unknown): false | Record<string, string | null> | undefined {
-  if (value === false) return false
-  const allowed = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-  const normalizeKey = (raw: string): string => {
-    const key = raw.trim().toLowerCase()
-    return ['none', 'disabled', 'false'].includes(key) ? 'off' : key
-  }
-  const efforts: Record<string, string | null> = {}
-  if (typeof value === 'string' || Array.isArray(value)) {
-    for (const item of typeof value === 'string' ? [value] : value) {
-      if (typeof item !== 'string') continue
-      const key = normalizeKey(item)
-      if (!allowed.has(key)) continue
-      efforts[key] = item.trim()
-    }
-  }
-  if (value && typeof value === 'object') {
-    for (const [rawKey, rawWireValue] of Object.entries(value as Record<string, unknown>)) {
-      const key = normalizeKey(rawKey)
-      if (!allowed.has(key)) continue
-      const wireValue = typeof rawWireValue === 'string' && rawWireValue.trim()
-        ? rawWireValue.trim()
-        : key === 'off' && (rawWireValue === null || rawWireValue === false || rawWireValue === '')
-          ? null
-          : undefined
-      if (wireValue === undefined) continue
-      // Prefer a canonical key if the endpoint supplies both `off` and an
-      // alias such as `none`.
-      if (!(key in efforts) || rawKey.trim().toLowerCase() === key) efforts[key] = wireValue
-    }
-  }
-  const levels = Object.keys(efforts)
-  if (levels.length === 0) return undefined
-  // PiAi treats a catalog with only `off` as semantically invalid. The
-  // capability service uses `none` for models that do not expose reasoning.
-  return levels.some((level) => level !== 'off') ? efforts : false
 }
 
 /** The public fields of one model, in the shape both writers expect. */
@@ -357,54 +415,7 @@ function publicModel(model: RendCoreModel): RendCoreModel {
 }
 
 /**
- * The modalities a list states, or undefined when it states none.
- *
- * Only text and image survive: the adapter's MODALITIES is exactly those two, so
- * a `file`, `video` or `audio` from the capability service would fail the
- * provider config at boot instead of widening what a request may carry.
- */
-function statedInput(values: string[]): Array<'text' | 'image'> | undefined {
-  const normalized = values
-    .map((value) => value.toLowerCase())
-    .filter((value): value is 'text' | 'image' => value === 'text' || value === 'image')
-  if (normalized.length === 0) return undefined
-  // Canonical order, so the generated patch does not churn with the service's
-  // own field order. An explicit text-only answer stays text-only.
-  return normalized.includes('image') ? ['text', 'image'] : ['text']
-}
-
-/**
- * What one model accepts, and whether that was stated rather than assumed.
- *
- * Nothing interrogates a gateway for what it accepts (see the adapter's own
- * `input` documentation): declaring images is what makes a vision model usable,
- * while declaring text alone silently disables the attach button for a model
- * that does accept them. The capability service answers for most models, but it
- * is a synced index with gaps — a model the gateway serves while the index has
- * no modalities for it was declared text-only, which is the bug this default
- * fixes. An unknown model is therefore declared multimodal; a model that
- * genuinely refuses images is refused by the provider mid-turn, which is the
- * documented trade of a claim about the endpoint over a guess in the other
- * direction.
- */
-function resolveInput(
-  values: string[],
-  model: Record<string, unknown>
-): { value: Array<'text' | 'image'>; stated: boolean } {
-  const stated = statedInput(values)
-  if (stated !== undefined) return { value: stated, stated: true }
-  if (model.supports_vision === true || model.supportsVision === true) return { value: [...DEFAULT_INPUT], stated: true }
-  return { value: [...DEFAULT_INPUT], stated: false }
-}
-
-/**
  * Fill in what the capability service did not state from the last answer it did.
- *
- * The service is a synced index: a model can be served by the gateway while the
- * index temporarily has no modalities for it, and re-deriving from a guess every
- * launch is what made a model's capabilities flicker. A remembered answer is
- * used when the service is silent (or, for the sanitized patch fallback, always,
- * since that file is a previous run's output rather than a fresh answer).
  */
 function mergeRememberedCapabilities(
   models: RendCoreModel[],
@@ -442,9 +453,10 @@ async function readCapabilityCache(
       const entry = objectValue(raw)
       if (entry === undefined) continue
       const input = statedInput(arrayOfStrings(entry.input))
+      const contextWindow = positiveInteger(entry.contextWindow)
       remembered.set(id.toLowerCase(), {
-        contextWindow: positiveInteger(entry.contextWindow),
-        maxTokens: positiveInteger(entry.maxTokens),
+        contextWindow,
+        maxTokens: clampMaxTokens(positiveInteger(entry.maxTokens), contextWindow),
         ...(input === undefined ? {} : { input }),
         reasoningEfforts: parseReasoning(entry.reasoningEfforts)
       })
@@ -479,17 +491,4 @@ async function writeCapabilityCache(
   }
 }
 
-function isImageGenerationOnly(id: string, value?: Record<string, unknown>): boolean {
-  if (/^(gpt-image|dall-e|imagen|flux|stable-diffusion|sdxl|midjourney)(?:[-_.]|$)/i.test(id)) return true
-  const task = stringValue(value?.task ?? value?.type ?? value?.capability)
-  return /image[-_ ]?generation|text[-_ ]?to[-_ ]?image/i.test(task)
-}
-
-function unique(models: RendCoreModel[]): RendCoreModel[] {
-  return models.filter((model, index, all) => all.findIndex((item) => item.id.toLowerCase() === model.id.toLowerCase()) === index)
-}
-function positiveInteger(value: unknown): number | undefined { return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined }
-function stringValue(value: unknown): string { return typeof value === 'string' ? value.trim() : '' }
-function arrayOfStrings(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [] }
-function objectValue(value: unknown): Record<string, any> | undefined { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : undefined }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }

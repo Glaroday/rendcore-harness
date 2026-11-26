@@ -43,6 +43,7 @@ import { RENDCORE_UPSTREAM_IPC } from '../../shared/rendcore-upstreams'
 import { classifyDesktopInstall } from '../profile/desktop-install-state'
 import { RendCoreUpstreamSettings } from '../runtime/rendcore-upstream-settings'
 import { RendCoreBackendHost } from '../runtime/rendcore-backend-host'
+import { refreshRendCoreModelCatalog } from '../runtime/rendcore-model-catalog'
 import { DesktopBackendController } from './backend/backend-controller'
 import { DesktopBootSession, retainDesktopBoot } from './backend/boot-session'
 import { DesktopHostFatalError, DesktopHostProcess } from './backend/host-process'
@@ -893,7 +894,9 @@ async function main(): Promise<void> {
       await reportFatal(failure)
     }
   })
-  backend = new DesktopBackendController(onFailure => new RendCoreBackendHost({
+  let rendcoreHost: RendCoreBackendHost | undefined
+  backend = new DesktopBackendController(onFailure => {
+    const attempt = new RendCoreBackendHost({
     dshHome, profile: safeMode ? SAFE_MODE_PROFILE : 'desktop', productPatch, enableRendCore: !safeMode, upstreams: rendcoreUpstreams,
     log: line => { console.error(line) },
     createHost: effectivePatch => {
@@ -928,7 +931,10 @@ async function main(): Promise<void> {
       stop: () => host.stop()
     }
     }
-  }), state => {
+    })
+    rendcoreHost = attempt
+    return attempt
+  }, state => {
     retainDesktopBoot(bootSession, state.phase)
     if (state.phase !== 'error' || quitting) return
     hostFailures.enqueue(state.failure)
@@ -971,6 +977,27 @@ async function main(): Promise<void> {
     ipcMain.handle(RENDCORE_UPSTREAM_IPC.read, event => { assertMain(event); return rendcoreUpstreams.snapshot() })
     ipcMain.handle(RENDCORE_UPSTREAM_IPC.probe, event => { assertMain(event); return rendcoreUpstreams.probe() })
     ipcMain.handle(RENDCORE_UPSTREAM_IPC.save, (event, value: unknown) => { assertMain(event); return rendcoreUpstreams.save(value) })
+    ipcMain.handle(RENDCORE_UPSTREAM_IPC.refreshModels, async event => {
+      assertMain(event)
+      const fallbackApiKey = await loginShell.then(result => result.environment.RENDCORE_API_KEY, () => process.env.RENDCORE_API_KEY)
+      const result = await refreshRendCoreModelCatalog(productPatch, dshHome, line => { console.error(line) }, {
+        preferredEndpoint: rendcoreUpstreams.preferredEndpoint,
+        fallbackApiKey,
+        baseURL: rendcoreHost?.gatewayBaseURL
+      })
+      if (!result.ok) return result
+      if (desktopHost !== undefined) {
+        try {
+          const applied = await desktopHost.reloadOverlay()
+          return { ...result, applied: true, changed: applied.changed }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error)
+          console.error(`[desktop] RendCore overlay hot-reload failed: ${msg}`)
+          return { ok: false, models: result.models, source: result.source, error: msg }
+        }
+      }
+      return result
+    })
   }
   ipcMain.handle(DESKTOP_IPC.localeBootstrap, async event => {
     assertMain(event)

@@ -27,6 +27,10 @@ export class RendCoreBackendHost implements BackendHost {
     createHost: (patch: string) => BackendHost
   }) {}
 
+  get gatewayBaseURL(): string | undefined {
+    return this.gateway?.baseURL
+  }
+
   async start(): Promise<void> {
     if (this.stopped) throw new Error('RendCore backend attempt was stopped')
     this.preparation = this.prepare()
@@ -58,7 +62,9 @@ export class RendCoreBackendHost implements BackendHost {
       preferredEndpoint: () => this.options.upstreams?.preferredEndpoint,
       onSelected: endpoint => this.options.upstreams?.recordSelected(endpoint)
     })
-    const catalog = await prepareRendCoreModelCatalog(productPatch, dshHome, log, this.gateway.baseURL)
+    const catalog = await prepareRendCoreModelCatalog(productPatch, dshHome, log, this.gateway.baseURL, {
+      preferredEndpoint: this.options.upstreams?.preferredEndpoint
+    })
     return catalog.path
   }
 }

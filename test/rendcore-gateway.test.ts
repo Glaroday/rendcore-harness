@@ -149,4 +149,56 @@ describe('RendCore automatic API routing', () => {
     // Consume the terminated response so its abort is observed by the caller.
     await stream.text().catch(() => undefined)
   })
+
+  it('routes GET /models to the matched 8600 catalog with the caller API key and parameters', async () => {
+    const apiEndpoint = await upstream((req, res) => {
+      if (req.url === '/v1/models') { res.end(models); return }
+      res.writeHead(404); res.end()
+    })
+    const catalogEndpoint = await upstream((req, res) => {
+      const key = req.headers.authorization
+      res.setHeader('Content-Type', 'application/json')
+      if (key === 'Bearer cpa_only_glm') {
+        res.end(JSON.stringify({
+          stats: { key_filtered: true },
+          models: [
+            { id: 'glm-5.3', configured: true, context: 1048576, max_output: 131072, input_modalities: ['text', 'image'] }
+          ]
+        }))
+        return
+      }
+      res.end(JSON.stringify({
+        stats: { key_filtered: true },
+        models: [
+          { id: 'gpt-6.1-sol', configured: true, context: 1050000, max_output: 128000, input_modalities: ['text', 'image'] }
+        ]
+      }))
+    })
+    const catalogURL = `${catalogEndpoint.replace(/\/v1$/, '')}/api/models`
+    const bridge = await startRendCoreGateway({
+      endpoints: [apiEndpoint],
+      catalogEndpoints: { [apiEndpoint]: catalogURL },
+      probeTimeoutMs: 150
+    })
+    cleanup.push(() => bridge.close())
+
+    const r1 = await fetch(`${bridge.baseURL}/models`, { headers: { Authorization: 'Bearer cpa_only_glm' } })
+    expect(r1.status).toBe(200)
+    expect(await r1.json()).toEqual({
+      object: 'list',
+      data: [{
+        id: 'glm-5.3',
+        object: 'model',
+        name: 'glm-5.3',
+        contextWindow: 1048576,
+        maxTokens: 131072,
+        architecture: { input_modalities: ['text', 'image'] }
+      }]
+    })
+
+    const r2 = await fetch(`${bridge.baseURL}/models`, { headers: { Authorization: 'Bearer cpa_only_sol' } })
+    expect(r2.status).toBe(200)
+    const j2 = await r2.json() as { data: Array<{ id: string }> }
+    expect(j2.data.map(row => row.id)).toEqual(['gpt-6.1-sol'])
+  })
 })

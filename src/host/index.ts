@@ -3,11 +3,12 @@ import type { PluginOperationRunId } from '@deepseek-ai/dsh-plugin-manager/diagn
 import { localDragResource } from './file-drag'
 import { installOperationDiagnostics } from './operation-diagnostics'
 import { pluginOperationHost } from './upstream-api'
-import { delimiter, join } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerOfficeEngineResolution } from '../../build/office-engine-resolution.mjs'
-import { inspect } from 'node:util'
-import { StartupError, loadLayeredEnv, loadProfileDirectory, reportSkippedBundles } from '@deepseek-ai/dsh-app-boot'
+import { inspect, isDeepStrictEqual } from 'node:util'
+import { StartupError, loadLayeredEnv, loadOverlayPatches, loadProfileDirectory, readProfilePatches, reconcileProfilePatches, reportSkippedBundles, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
+import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { runProfile } from '@deepseek-ai/dsh/profile-boot'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -75,6 +76,29 @@ async function main(): Promise<void> {
       if ('requestId' in message && typeof message.requestId === 'number') dragReads.get(message.requestId)?.abort()
       return
     }
+    if (message.type === 'reload-overlay') {
+      if (!('requestId' in message) || typeof message.requestId !== 'number' || !Number.isSafeInteger(message.requestId)) return
+      const requestId = message.requestId
+      const task = (async () => {
+        try {
+          if (stopping !== undefined) throw new Error('Host stopping')
+          const { ctx } = await application
+          const changed = await reloadOverlayPatches(ctx)
+          await send({ type: 'reload-overlay', requestId, changed })
+        } catch (error) {
+          console.error(error)
+          await send({
+            type: 'reload-overlay',
+            requestId,
+            changed: false,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        }
+      })().catch((error: unknown) => { console.error(error) })
+      dragTasks.add(task)
+      void task.finally(() => { dragTasks.delete(task) })
+      return
+    }
     if (message.type !== 'file-drag-resource') return
     if (!('requestId' in message) || typeof message.requestId !== 'number' || !Number.isSafeInteger(message.requestId)
       || !('address' in message) || typeof message.address !== 'string') return
@@ -120,6 +144,31 @@ function sendIpc(message: object, callback?: (error: Error | null) => void): voi
     if (error !== null) console.error(error)
     callback?.(error)
   })
+}
+
+async function reloadOverlayPatches(ctx: Awaited<ReturnType<typeof runProfile>>['ctx']): Promise<boolean> {
+  const run = async (): Promise<boolean> => {
+    const profileContext = ctx.get('profileContext') as (ProfileContext & { overlays: ReturnType<typeof loadOverlayPatches> }) | undefined
+    if (profileContext === undefined) throw new Error('Profile context unavailable')
+    return await withFileLock(join(profileContext.dir, 'package.json'), async () => {
+      const previousOverlays = profileContext.overlays
+      const nextOverlays = productPatchFiles().flatMap(file => loadOverlayPatches('dsh', resolve(file)))
+      if (isDeepStrictEqual(previousOverlays, nextOverlays)) return false
+      profileContext.overlays = nextOverlays
+      try {
+        const patches = readProfilePatches('dsh', profileContext)
+        await reconcileProfilePatches(ctx.root, patches, 'dsh')
+        return true
+      } catch (error) {
+        profileContext.overlays = previousOverlays
+        const rollbackPatches = readProfilePatches('dsh', profileContext)
+        await reconcileProfilePatches(ctx.root, rollbackPatches, 'dsh').catch(() => undefined)
+        throw error
+      }
+    })
+  }
+  const hmr = ctx.get('hmr') as { runExclusive?: <T>(operation: () => Promise<T>) => Promise<T> } | undefined
+  return typeof hmr?.runExclusive === 'function' ? await hmr.runExclusive(run) : await run()
 }
 
 function productPatchFiles(): string[] {
